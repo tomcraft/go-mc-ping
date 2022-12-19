@@ -1,42 +1,35 @@
 package main
 
 import (
+	"fmt"
 	"log"
-	"strconv"
 	"strings"
 )
 
+type HandshakePacket struct {
+	ProtocolVersion int    `packet:"varint"`
+	ServerAddress   string `packet:"string"`
+	ServerPort      int    `packet:"int16"`
+	RequestedState  int    `packet:"varint"`
+}
+
 func createHandshakeProtocol() func(packetId uint8) PacketHandler {
 	handlers := make(map[uint8]PacketHandler)
-	handlers[0x00] = handleHandshake
+	handlers[0x00] = wrapHandler(handleHandshake)
 	return func(packetId uint8) PacketHandler {
 		return handlers[packetId]
 	}
 }
 
-func handleHandshake(client *Client, reader ByteArrayReader) error {
+func handleHandshake(client *Client, packet HandshakePacket) error {
 	log.Println("answering handshake")
-	var err error
-	client.protocolVersion, err = readVarInt(reader)
-	if err != nil {
-		return err
-	}
-	client.virtualHost, err = readString(reader)
-	if err != nil {
-		return err
-	}
-	index := strings.Index(client.virtualHost, "\000")
+
+	index := strings.Index(packet.ServerAddress, "\000")
 	if index != -1 {
-		client.virtualHost = client.virtualHost[:index]
+		packet.ServerAddress = packet.ServerAddress[:index]
 	}
-	port, err := readShort(reader)
-	if err != nil {
-		return err
-	}
-	client.virtualHost += ":" + strconv.Itoa(int(port))
-	requestedProtocolState, err := readVarInt(reader)
-	if err != nil {
-		return err
-	}
-	return client.switchProtocol(requestedProtocolState)
+
+	client.protocolVersion = packet.ProtocolVersion
+	client.virtualHost = fmt.Sprintf("%s:%d", packet.ServerAddress, packet.ServerPort)
+	return client.switchProtocol(packet.RequestedState)
 }

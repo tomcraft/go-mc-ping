@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"log"
 	"os"
 )
@@ -28,6 +27,16 @@ type StatusResponse struct {
 	Favicon     string        `json:"favicon"`
 }
 
+type EmptyPacket struct{}
+
+type StatusResponsePacket struct {
+	Response StatusResponse `packet:"json"`
+}
+
+type PingPacket struct {
+	PingTime int64 `packet:"int64"`
+}
+
 var favicon = readFavicon("assets/eduard.png")
 
 func readFavicon(file string) string {
@@ -40,8 +49,8 @@ func readFavicon(file string) string {
 
 func createStatusProtocol() func(packetId uint8) PacketHandler {
 	handlers := make(map[uint8]PacketHandler)
-	handlers[0x00] = handleStatusRequest
-	handlers[0x01] = handlePingRequest
+	handlers[0x00] = wrapHandler(handleStatusRequest)
+	handlers[0x01] = wrapHandler(handlePingRequest)
 	return func(packetId uint8) PacketHandler {
 		return handlers[packetId]
 	}
@@ -59,29 +68,16 @@ func createStatusResponse(protocolVersion int, favicon string) StatusResponse {
 	}
 }
 
-func handleStatusRequest(client *Client, reader ByteArrayReader) error {
+func handleStatusRequest(client *Client, _ EmptyPacket) error {
 	log.Println("answering status request")
-	return client.sendPacket(0x00, func(writer ByteArrayWriter) error {
-		response := createStatusResponse(client.protocolVersion, favicon)
-		if jsonBytes, err := json.Marshal(response); err != nil {
-			return err
-		} else {
-			return writeByteArray(writer, jsonBytes)
-		}
-	})
+	response := createStatusResponse(client.protocolVersion, favicon)
+	return client.sendPacket(0x00, StatusResponsePacket{response})
 }
 
-func handlePingRequest(client *Client, reader ByteArrayReader) error {
+func handlePingRequest(client *Client, packet PingPacket) error {
 	log.Println("answering ping request")
 
-	pingTime, err := readLong(reader)
-	if err != nil {
-		return err
-	}
-
-	if err = client.sendPacket(0x01, func(writer ByteArrayWriter) error {
-		return writeLong(writer, pingTime)
-	}); err != nil {
+	if err := client.sendPacket(0x01, packet); err != nil {
 		return err
 	}
 

@@ -6,9 +6,22 @@ import (
 	"log"
 )
 
+type DisconnectPacket struct {
+	Text ChatComponent `packet:"component"`
+}
+
+type LoginStartPacket struct {
+	Username string `packet:"string"`
+}
+
+type LoginFinishPacket struct {
+	Uuid     string `packet:"string"`
+	Username string `packet:"string"`
+}
+
 func createLoginProtocol() func(packetId uint8) PacketHandler {
 	handlers := make(map[uint8]PacketHandler)
-	handlers[0x00] = handleLoginStart
+	handlers[0x00] = wrapHandler(handleLoginStart)
 	return func(packetId uint8) PacketHandler {
 		return handlers[packetId]
 	}
@@ -29,24 +42,11 @@ func createOfflineUuid(username string) string {
 	)
 }
 
-func handleLoginStart(client *Client, reader ByteArrayReader) error {
+func handleLoginStart(client *Client, packet LoginStartPacket) error {
 	log.Println("answering to login start")
 
-	username, err := readString(reader)
-	if err != nil {
-		return err
-	}
-
-	client.identity = &Identity{createOfflineUuid(username), username}
-	if err := client.sendPacket(0x02, func(writer ByteArrayWriter) error {
-		if err := writeString(writer, client.identity.uuid); err != nil {
-			return err
-		}
-		if err := writeString(writer, client.identity.username); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	client.identity = &Identity{createOfflineUuid(packet.Username), packet.Username}
+	if err := client.sendPacket(0x02, LoginFinishPacket{client.identity.uuid, client.identity.username}); err != nil {
 		return err
 	}
 

@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -153,7 +152,13 @@ func (client *Client) tick() error {
 	return nil
 }
 
-func (client *Client) sendPacket(id int8, handler func(writer ByteArrayWriter) error) error {
+func (client *Client) sendPacket(id int8, packet any) error {
+	return client.sendRawPacket(id, func(writer ByteArrayWriter) error {
+		return serializePacket(writer, packet)
+	})
+}
+
+func (client *Client) sendRawPacket(id int8, handler func(writer ByteArrayWriter) error) error {
 	packetBuffer := bytes.Buffer{}
 
 	if err := writeVarInt(&packetBuffer, int(id)); err != nil {
@@ -176,77 +181,35 @@ func (client *Client) sendPacket(id int8, handler func(writer ByteArrayWriter) e
 func (client *Client) keepAlive() error {
 	client.lastSentKeepAliveTime = time.Now().UnixMilli()
 	client.lastKeepAlive = int(time.Now().Unix())
-	return client.sendPacket(0x00, func(writer ByteArrayWriter) error {
-		return writeVarInt(writer, client.lastKeepAlive)
-	})
+	return client.sendPacket(0x00, KeepAlivePacket{client.lastKeepAlive})
 }
 
 func (client *Client) join() error {
 	log.Println("sending join sequence")
 	client.lastReceivedKeepAliveTime = time.Now().UnixMilli() - 5000
 	client.lastSentKeepAliveTime = client.lastReceivedKeepAliveTime
-	if err := client.sendPacket(0x01, func(writer ByteArrayWriter) error {
-		if err := writeInt(writer, 1); err != nil {
-			return err
-		}
-		if err := writeUnsignedByte(writer, 3); err != nil {
-			return err
-		}
-		if err := writeByte(writer, 0); err != nil {
-			return err
-		}
-		if err := writeUnsignedByte(writer, 0); err != nil {
-			return err
-		}
-		if err := writeUnsignedByte(writer, 255); err != nil {
-			return err
-		}
-		if err := writeString(writer, "flat"); err != nil {
-			return err
-		}
-		return writeBool(writer, false)
+	if err := client.sendPacket(0x01, JoinGamePacket{
+		EntityId:         1,
+		GameMode:         3,
+		Dimension:        0,
+		Difficulty:       0,
+		MaxPlayers:       16,
+		LevelType:        "flat",
+		ReducedDebugInfo: false,
 	}); err != nil {
 		return err
 	}
-	if err := client.sendPacket(0x3F, func(writer ByteArrayWriter) error {
-		if err := writeString(writer, "MC|Brand"); err != nil {
-			return err
-		}
-		return writeString(writer, "GoTOTO")
-	}); err != nil {
+	if err := client.sendPacket(0x3F, CustomPayloadPacket{"MC|Brand", []byte("GoTOTO")}); err != nil {
 		return err
 	}
-	if err := client.sendPacket(0x08, func(writer ByteArrayWriter) error {
-		pos := []float64{0.0, 100.0, 0}
-		for _, val := range pos {
-			if err := writeDouble(writer, val); err != nil {
-				return err
-			}
-		}
-		direction := []float32{0.0, 0.0}
-		for _, val := range direction {
-			if err := writeFloat(writer, val); err != nil {
-				return err
-			}
-		}
-		return writeByte(writer, 0)
-	}); err != nil {
+	if err := client.sendPacket(0x08, PlayerPosLookPacket{Y: 100}); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (client *Client) sendMessage(message ChatComponent, position byte) error {
-	return client.sendPacket(0x02, func(writer ByteArrayWriter) error {
-		jsonBytes, err := json.Marshal(message)
-		if err != nil {
-			return err
-		}
-		if err := writeByteArray(writer, jsonBytes); err != nil {
-			return err
-		}
-		return writeUnsignedByte(writer, position)
-	})
+	return client.sendPacket(0x02, OutgoingChatPacket{message, position})
 }
 
 func (client *Client) disconnect(message ChatComponent) error {
@@ -258,13 +221,7 @@ func (client *Client) disconnect(message ChatComponent) error {
 	if client.protocolState == 3 {
 		packetId = int8(0x40)
 	}
-	if err := client.sendPacket(packetId, func(writer ByteArrayWriter) error {
-		jsonBytes, err := json.Marshal(message)
-		if err != nil {
-			return err
-		}
-		return writeByteArray(writer, jsonBytes)
-	}); err != nil {
+	if err := client.sendPacket(packetId, DisconnectPacket{message}); err != nil {
 		return err
 	}
 	return client.closeConnection()
