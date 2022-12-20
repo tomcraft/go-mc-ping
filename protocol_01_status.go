@@ -47,35 +47,31 @@ func readFavicon(file string) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
 }
 
-func createStatusProtocol() func(packetId uint8) PacketHandler {
-	handlers := make(map[uint8]PacketHandler)
+func createStatusProtocol() func(packetId byte) PacketHandler {
+	handlers := make(map[byte]PacketHandler)
 	handlers[0x00] = wrapHandler(handleStatusRequest)
 	handlers[0x01] = wrapHandler(handlePingRequest)
-	return func(packetId uint8) PacketHandler {
+	return func(packetId byte) PacketHandler {
 		return handlers[packetId]
 	}
 }
 
-func createStatusResponse(protocolVersion int, favicon string) StatusResponse {
-	return StatusResponse{
+func handleStatusRequest(client *Client, _ EmptyPacket) error {
+	log.Println("Answering to status request")
+	response := StatusResponse{
 		Version: StatusVersion{
 			"GoProtocol",
-			protocolVersion,
+			client.ProtocolVersion,
 		},
 		Players:     StatusPlayers{Max: -1, Online: 6969},
 		Description: ChatComponent{Text: "§cCoucou §bles §anoobs"},
 		Favicon:     favicon,
 	}
-}
-
-func handleStatusRequest(client *Client, _ EmptyPacket) error {
-	log.Println("answering status request")
-	response := createStatusResponse(client.protocolVersion, favicon)
 	return client.sendPacket(0x00, StatusResponsePacket{response})
 }
 
 func handlePingRequest(client *Client, packet PingPacket) error {
-	log.Println("answering ping request")
+	log.Println("Answering to ping request")
 
 	if err := client.sendPacket(0x01, packet); err != nil {
 		return err

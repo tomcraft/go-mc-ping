@@ -13,23 +13,23 @@ type HandshakePacket struct {
 	RequestedState  int    `packet:"varint"`
 }
 
-func createHandshakeProtocol() func(packetId uint8) PacketHandler {
-	handlers := make(map[uint8]PacketHandler)
+func createHandshakeProtocol() func(packetId byte) PacketHandler {
+	handlers := make(map[byte]PacketHandler)
 	handlers[0x00] = wrapHandler(handleHandshake)
-	return func(packetId uint8) PacketHandler {
+	return func(packetId byte) PacketHandler {
 		return handlers[packetId]
 	}
 }
 
 func handleHandshake(client *Client, packet HandshakePacket) error {
-	log.Println("answering handshake")
+	log.Println("Answering handshake")
 
 	index := strings.Index(packet.ServerAddress, "\000")
 	if index != -1 {
 		packet.ServerAddress = packet.ServerAddress[:index]
 	}
 
-	client.protocolVersion = packet.ProtocolVersion
-	client.virtualHost = fmt.Sprintf("%s:%d", packet.ServerAddress, packet.ServerPort)
+	client.ProtocolVersion = packet.ProtocolVersion
+	client.VirtualHost = fmt.Sprintf("%s:%d", packet.ServerAddress, packet.ServerPort)
 	return client.switchProtocol(packet.RequestedState)
 }

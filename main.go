@@ -30,11 +30,11 @@ func main() {
 			log.Println("Error accepting: ", err)
 			continue
 		}
-		log.Println("client connected")
+		log.Println("Client connected")
 		client := Client{
-			connection:       connection,
-			connectionReader: bufio.NewReader(connection),
-			connectionActive: true,
+			Connection:       connection,
+			ConnectionReader: bufio.NewReader(connection),
+			ConnectionActive: true,
 		}
 		go client.processClient()
 	}

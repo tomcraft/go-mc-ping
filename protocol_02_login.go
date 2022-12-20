@@ -19,10 +19,10 @@ type LoginFinishPacket struct {
 	Username string `packet:"string"`
 }
 
-func createLoginProtocol() func(packetId uint8) PacketHandler {
-	handlers := make(map[uint8]PacketHandler)
+func createLoginProtocol() func(packetId byte) PacketHandler {
+	handlers := make(map[byte]PacketHandler)
 	handlers[0x00] = wrapHandler(handleLoginStart)
-	return func(packetId uint8) PacketHandler {
+	return func(packetId byte) PacketHandler {
 		return handlers[packetId]
 	}
 }
@@ -43,10 +43,10 @@ func createOfflineUuid(username string) string {
 }
 
 func handleLoginStart(client *Client, packet LoginStartPacket) error {
-	log.Println("answering to login start")
+	log.Println("Answering to login start")
 
-	client.identity = &Identity{createOfflineUuid(packet.Username), packet.Username}
-	if err := client.sendPacket(0x02, LoginFinishPacket{client.identity.uuid, client.identity.username}); err != nil {
+	client.Identity = &Identity{createOfflineUuid(packet.Username), packet.Username}
+	if err := client.sendPacket(0x02, LoginFinishPacket{client.Identity.Uuid, client.Identity.Username}); err != nil {
 		return err
 	}
 

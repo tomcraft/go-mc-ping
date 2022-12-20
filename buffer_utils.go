@@ -19,29 +19,29 @@ type ByteArrayWriter interface {
 	io.ByteWriter
 }
 
-func readByte(reader ByteArrayReader) (int8, error) {
-	if b, err := reader.ReadByte(); err != nil {
+func readInt8(reader ByteArrayReader) (int8, error) {
+	b, err := reader.ReadByte()
+	if err != nil {
 		return 0, err
-	} else {
-		return int8(b), nil
 	}
+	return int8(b), nil
 }
 
-func writeByte(writer ByteArrayWriter, value int8) error {
+func writeInt8(writer ByteArrayWriter, value int8) error {
 	return writer.WriteByte(byte(value))
 }
 
-func readUnsignedByte(reader ByteArrayReader) (byte, error) {
+func readByte(reader ByteArrayReader) (byte, error) {
 	return reader.ReadByte()
 }
 
-func writeUnsignedByte(writer ByteArrayWriter, value byte) error {
+func writeByte(writer ByteArrayWriter, value byte) error {
 	return writer.WriteByte(value)
 }
 
 func readVarInt(reader io.ByteReader) (int, error) {
-	varint, err := binary.ReadUvarint(reader)
-	return int(varint), err
+	value, err := binary.ReadUvarint(reader)
+	return int(value), err
 }
 
 func writeVarInt(writer io.ByteWriter, value int) error {
@@ -69,7 +69,7 @@ func writeInt(writer ByteArrayWriter, value int) error {
 	return err
 }
 
-func readShort(reader ByteArrayReader) (int16, error) {
+func readInt16(reader ByteArrayReader) (int16, error) {
 	array := make([]byte, 2)
 	if _, err := reader.Read(array); err != nil {
 		return 0, err
@@ -77,14 +77,14 @@ func readShort(reader ByteArrayReader) (int16, error) {
 	return int16(binary.BigEndian.Uint16(array)), nil
 }
 
-func writeShort(writer ByteArrayWriter, value int16) error {
+func writeInt16(writer ByteArrayWriter, value int16) error {
 	array := make([]byte, 2)
 	binary.BigEndian.PutUint16(array, uint16(value))
 	_, err := writer.Write(array)
 	return err
 }
 
-func readLong(reader ByteArrayReader) (int64, error) {
+func readInt64(reader ByteArrayReader) (int64, error) {
 	array := make([]byte, 8)
 	if _, err := reader.Read(array); err != nil {
 		return 0, err
@@ -92,7 +92,7 @@ func readLong(reader ByteArrayReader) (int64, error) {
 	return int64(binary.BigEndian.Uint64(array)), nil
 }
 
-func writeLong(writer ByteArrayWriter, value int64) error {
+func writeInt64(writer ByteArrayWriter, value int64) error {
 	array := make([]byte, 8)
 	binary.BigEndian.PutUint64(array, uint64(value))
 	_, err := writer.Write(array)
@@ -114,7 +114,7 @@ func writeFloat(writer ByteArrayWriter, value float32) error {
 	return err
 }
 
-func readDouble(reader ByteArrayReader) (float64, error) {
+func readFloat64(reader ByteArrayReader) (float64, error) {
 	array := make([]byte, 8)
 	if _, err := reader.Read(array); err != nil {
 		return 0, err
@@ -122,7 +122,7 @@ func readDouble(reader ByteArrayReader) (float64, error) {
 	return math.Float64frombits(binary.BigEndian.Uint64(array)), nil
 }
 
-func writeDouble(writer ByteArrayWriter, value float64) error {
+func writeFloat64(writer ByteArrayWriter, value float64) error {
 	array := make([]byte, 8)
 	binary.BigEndian.PutUint64(array, math.Float64bits(value))
 	_, err := writer.Write(array)
@@ -160,9 +160,11 @@ func writeByteArray(writer ByteArrayWriter, value []byte) error {
 }
 
 func readBool(reader ByteArrayReader) (bool, error) {
-	if val, err := reader.ReadByte(); err != nil {
+	val, err := reader.ReadByte()
+	if err != nil {
 		return false, err
-	} else if val == 0 {
+	}
+	if val == 0 {
 		return false, nil
 	} else {
 		return true, nil
@@ -186,21 +188,22 @@ func writeChatComponent(writer ByteArrayWriter, value ChatComponent) error {
 }
 
 func readJson[T any](reader ByteArrayReader, value T) (T, error) {
-	if array, err := readByteArray(reader); err != nil {
+	array, err := readByteArray(reader)
+	if err != nil {
 		return value, err
-	} else if err := json.Unmarshal(array, value); err != nil {
-		return value, err
-	} else {
-		return value, nil
 	}
+	if err := json.Unmarshal(array, value); err != nil {
+		return value, err
+	}
+	return value, nil
 }
 
 func writeJson(writer ByteArrayWriter, value any) error {
-	if jsonBytes, err := json.Marshal(value); err != nil {
+	jsonBytes, err := json.Marshal(value)
+	if err != nil {
 		return err
-	} else {
-		return writeByteArray(writer, jsonBytes)
 	}
+	return writeByteArray(writer, jsonBytes)
 }
 
 func serializePacket(writer ByteArrayWriter, packet any) error {
@@ -217,22 +220,22 @@ func serializePacket(writer ByteArrayWriter, packet any) error {
 		vValue := v.Field(i)
 		var err error
 		switch tag {
+		case "int8":
+			err = writeInt8(writer, int8(vValue.Int()))
 		case "byte":
-			err = writeByte(writer, int8(vValue.Int()))
-		case "unsigned_byte":
-			err = writeUnsignedByte(writer, byte(vValue.Uint()))
+			err = writeByte(writer, byte(vValue.Uint()))
 		case "varint":
 			err = writeVarInt(writer, int(vValue.Int()))
 		case "int":
 			err = writeInt(writer, int(vValue.Int()))
 		case "int16":
-			err = writeShort(writer, int16(vValue.Int()))
+			err = writeInt16(writer, int16(vValue.Int()))
 		case "int64":
-			err = writeLong(writer, vValue.Int())
+			err = writeInt64(writer, vValue.Int())
 		case "float":
 			err = writeFloat(writer, float32(vValue.Float()))
 		case "float64":
-			err = writeDouble(writer, vValue.Float())
+			err = writeFloat64(writer, vValue.Float())
 		case "string":
 			err = writeString(writer, vValue.String())
 		case "byte_array":
@@ -267,11 +270,11 @@ func deserializePacket(reader ByteArrayReader, vType reflect.Type) (reflect.Valu
 		var err error
 		var val any
 		switch tag {
+		case "int8":
+			val, err = readInt8(reader)
+			vValue.SetInt(int64(val.(int8)))
 		case "byte":
 			val, err = readByte(reader)
-			vValue.SetInt(int64(val.(int8)))
-		case "unsigned_byte":
-			val, err = readUnsignedByte(reader)
 			vValue.SetUint(uint64(val.(byte)))
 		case "varint":
 			val, err = readVarInt(reader)
@@ -280,16 +283,16 @@ func deserializePacket(reader ByteArrayReader, vType reflect.Type) (reflect.Valu
 			val, err = readInt(reader)
 			vValue.SetInt(int64(val.(int)))
 		case "int16":
-			val, err = readShort(reader)
+			val, err = readInt16(reader)
 			vValue.SetInt(int64(val.(int16)))
 		case "int64":
-			val, err = readLong(reader)
+			val, err = readInt64(reader)
 			vValue.SetInt(val.(int64))
 		case "float":
 			val, err = readFloat(reader)
 			vValue.SetFloat(float64(val.(float32)))
 		case "float64":
-			val, err = readDouble(reader)
+			val, err = readFloat64(reader)
 			vValue.SetFloat(val.(float64))
 		case "string":
 			val, err = readString(reader)

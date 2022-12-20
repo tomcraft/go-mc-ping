@@ -11,10 +11,10 @@ type KeepAlivePacket struct {
 
 type JoinGamePacket struct {
 	EntityId         int    `packet:"int"`
-	GameMode         byte   `packet:"unsigned_byte"`
-	Dimension        int8   `packet:"byte"`
-	Difficulty       byte   `packet:"unsigned_byte"`
-	MaxPlayers       byte   `packet:"unsigned_byte"`
+	GameMode         byte   `packet:"byte"`
+	Dimension        int8   `packet:"int8"`
+	Difficulty       byte   `packet:"byte"`
+	MaxPlayers       byte   `packet:"byte"`
 	LevelType        string `packet:"string"`
 	ReducedDebugInfo bool   `packet:"bool"`
 }
@@ -22,7 +22,7 @@ type JoinGamePacket struct {
 type PlayerPosLookPacket struct {
 	X, Y, Z    float64 `packet:"float64"`
 	Yaw, Pitch float32 `packet:"float"`
-	Flags      byte    `packet:"unsigned_byte"`
+	Flags      byte    `packet:"byte"`
 }
 
 type IncomingChatPacket struct {
@@ -31,7 +31,7 @@ type IncomingChatPacket struct {
 
 type OutgoingChatPacket struct {
 	Text     ChatComponent `packet:"component"`
-	Position byte          `packet:"unsigned_byte"`
+	Position byte          `packet:"byte"`
 }
 
 type CustomPayloadPacket struct {
@@ -39,14 +39,14 @@ type CustomPayloadPacket struct {
 	Payload []byte `packet:"byte_array"`
 }
 
-func createPlayProtocol() func(packetId uint8) PacketHandler {
-	handlers := make(map[uint8]PacketHandler)
+func createPlayProtocol() func(packetId byte) PacketHandler {
+	handlers := make(map[byte]PacketHandler)
 	handlers[0x00] = wrapHandler(handleKeepAlive)
 	handlers[0x01] = wrapHandler(handleTextInput)
 	defaultHandler := func(client *Client, reader ByteArrayReader) error {
 		return nil
 	}
-	return func(packetId uint8) PacketHandler {
+	return func(packetId byte) PacketHandler {
 		handler, ok := handlers[packetId]
 		if ok {
 			return handler
@@ -56,12 +56,12 @@ func createPlayProtocol() func(packetId uint8) PacketHandler {
 }
 
 func handleKeepAlive(client *Client, packet KeepAlivePacket) error {
-	if packet.RandomId == client.lastKeepAlive {
-		client.lastReceivedKeepAliveTime = time.Now().UnixMilli()
+	if packet.RandomId == client.LastKeepAlive {
+		client.LastReceivedKeepAliveTime = time.Now().UnixMilli()
 	}
 	return nil
 }
 
 func handleTextInput(client *Client, packet IncomingChatPacket) error {
-	return client.sendMessage(ChatComponent{Text: fmt.Sprintf("<%s> %s", client.identity.username, packet.Text)}, 0)
+	return client.sendMessage(ChatComponent{Text: fmt.Sprintf("<%s> %s", client.Identity.Username, packet.Text)}, 0)
 }
