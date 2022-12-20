@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"golang.org/x/exp/constraints"
 	"io"
 	"math"
 	"reflect"
@@ -17,6 +18,17 @@ type ByteArrayReader interface {
 type ByteArrayWriter interface {
 	io.Writer
 	io.ByteWriter
+}
+
+type TypeCodec struct {
+	Writer func(writer ByteArrayWriter, value reflect.Value) error
+	Reader func(reader ByteArrayReader, value reflect.Value) error
+}
+
+var typeCodecs = make(map[string]TypeCodec)
+
+func RegisterCodec(name string, codec TypeCodec) {
+	typeCodecs[name] = codec
 }
 
 func readInt8(reader ByteArrayReader) (int8, error) {
@@ -39,12 +51,12 @@ func writeByte(writer ByteArrayWriter, value byte) error {
 	return writer.WriteByte(value)
 }
 
-func readVarInt(reader io.ByteReader) (int, error) {
+func readVarInt(reader ByteArrayReader) (int, error) {
 	value, err := binary.ReadUvarint(reader)
 	return int(value), err
 }
 
-func writeVarInt(writer io.ByteWriter, value int) error {
+func writeVarInt(writer ByteArrayWriter, value int) error {
 	for value >= 0x80 {
 		if err := writer.WriteByte(byte(value) | 0x80); err != nil {
 			return err
@@ -221,38 +233,11 @@ func SerializePacket(writer ByteArrayWriter, packet any) error {
 			continue
 		}
 		fieldValue := packetValue.Field(i)
-		var err error
-		switch tag {
-		case "int8":
-			err = writeInt8(writer, int8(fieldValue.Int()))
-		case "byte":
-			err = writeByte(writer, byte(fieldValue.Uint()))
-		case "varint":
-			err = writeVarInt(writer, int(fieldValue.Int()))
-		case "int":
-			err = writeInt(writer, int(fieldValue.Int()))
-		case "int16":
-			err = writeInt16(writer, int16(fieldValue.Int()))
-		case "int64":
-			err = writeInt64(writer, fieldValue.Int())
-		case "float":
-			err = writeFloat(writer, float32(fieldValue.Float()))
-		case "float64":
-			err = writeFloat64(writer, fieldValue.Float())
-		case "string":
-			err = writeString(writer, fieldValue.String())
-		case "byte_array":
-			err = writeByteArray(writer, fieldValue.Bytes())
-		case "bool":
-			err = writeBool(writer, fieldValue.Bool())
-		case "component":
-			err = writeChatComponent(writer, fieldValue.Interface().(ChatComponent))
-		case "json":
-			err = writeJson(writer, fieldValue.Interface())
-		default:
-			err = errors.New("unknown serializer type: " + tag)
+		codec, ok := typeCodecs[tag]
+		if !ok {
+			return errors.New("unknown serializer type: " + tag)
 		}
-		if err != nil {
+		if err := codec.Writer(writer, fieldValue); err != nil {
 			return err
 		}
 	}
@@ -270,56 +255,112 @@ func DeserializePacket(reader ByteArrayReader, packetType reflect.Type) (reflect
 		if tag == "" || tag == "-" {
 			continue
 		}
+
 		fieldValue := packetValue.Field(i)
-		var err error
-		var val any
-		switch tag {
-		case "int8":
-			val, err = readInt8(reader)
-			fieldValue.SetInt(int64(val.(int8)))
-		case "byte":
-			val, err = readByte(reader)
-			fieldValue.SetUint(uint64(val.(byte)))
-		case "varint":
-			val, err = readVarInt(reader)
-			fieldValue.SetInt(int64(val.(int)))
-		case "int":
-			val, err = readInt(reader)
-			fieldValue.SetInt(int64(val.(int)))
-		case "int16":
-			val, err = readInt16(reader)
-			fieldValue.SetInt(int64(val.(int16)))
-		case "int64":
-			val, err = readInt64(reader)
-			fieldValue.SetInt(val.(int64))
-		case "float":
-			val, err = readFloat(reader)
-			fieldValue.SetFloat(float64(val.(float32)))
-		case "float64":
-			val, err = readFloat64(reader)
-			fieldValue.SetFloat(val.(float64))
-		case "string":
-			val, err = readString(reader)
-			fieldValue.SetString(val.(string))
-		case "byte_array":
-			val, err = readByteArray(reader)
-			fieldValue.SetBytes(val.([]byte))
-		case "bool":
-			val, err = readBool(reader)
-			fieldValue.SetBool(val.(bool))
-		case "component":
-			val, err = readChatComponent(reader)
-			fieldValue.Set(reflect.ValueOf(val))
-		case "json":
-			reflectVal := reflect.New(fieldValue.Type())
-			val, err = readJson(reader, reflectVal)
-			fieldValue.Set(reflectVal)
-		default:
-			err = errors.New("unknown serializer type: " + tag)
+		codec, ok := typeCodecs[tag]
+		if !ok {
+			return packetPtr, errors.New("unknown serializer type: " + tag)
 		}
-		if err != nil {
+		if err := codec.Reader(reader, fieldValue); err != nil {
 			return packetPtr, err
 		}
 	}
 	return packetPtr, nil
+}
+
+func bakeWriter[T any](writeFn func(ByteArrayWriter, T) error, getterFn func(reflect.Value) T) func(ByteArrayWriter, reflect.Value) error {
+	return func(writer ByteArrayWriter, value reflect.Value) error {
+		return writeFn(writer, getterFn(value))
+	}
+}
+
+func bakeReader[T any](readFn func(ByteArrayReader) (T, error), setterFn func(reflect.Value, T)) func(ByteArrayReader, reflect.Value) error {
+	return func(reader ByteArrayReader, value reflect.Value) error {
+		val, err := readFn(reader)
+		if err != nil {
+			return err
+		}
+		setterFn(value, val)
+		return nil
+	}
+}
+
+func bakeIntWriter[T constraints.Signed](writeFn func(ByteArrayWriter, T) error) func(ByteArrayWriter, reflect.Value) error {
+	return bakeWriter(writeFn, func(value reflect.Value) T {
+		return T(value.Int())
+	})
+}
+
+func bakeIntReader[T constraints.Signed](readFn func(ByteArrayReader) (T, error)) func(ByteArrayReader, reflect.Value) error {
+	return bakeReader(readFn, func(value reflect.Value, val T) {
+		value.SetInt(int64(val))
+	})
+}
+
+func bakeIntCodec[T constraints.Signed](writeFn func(ByteArrayWriter, T) error, readFn func(ByteArrayReader) (T, error)) TypeCodec {
+	return TypeCodec{
+		Writer: bakeIntWriter(writeFn),
+		Reader: bakeIntReader(readFn),
+	}
+}
+
+func init() {
+	RegisterCodec("byte", TypeCodec{
+		Writer: bakeWriter(writeByte, func(value reflect.Value) byte {
+			return byte(value.Uint())
+		}),
+		Reader: bakeReader(readByte, func(value reflect.Value, val byte) {
+			value.SetUint(uint64(val))
+		}),
+	})
+
+	RegisterCodec("int8", bakeIntCodec(writeInt8, readInt8))
+	RegisterCodec("int16", bakeIntCodec(writeInt16, readInt16))
+	RegisterCodec("int", bakeIntCodec(writeInt, readInt))
+	RegisterCodec("int64", bakeIntCodec(writeInt64, readInt64))
+	RegisterCodec("varint", bakeIntCodec(writeVarInt, readVarInt))
+
+	RegisterCodec("float", TypeCodec{
+		Writer: bakeWriter(writeFloat, func(value reflect.Value) float32 {
+			return float32(value.Float())
+		}),
+		Reader: bakeReader(readFloat, func(value reflect.Value, val float32) {
+			value.SetFloat(float64(val))
+		}),
+	})
+	RegisterCodec("float64", TypeCodec{
+		Writer: bakeWriter(writeFloat64, reflect.Value.Float),
+		Reader: bakeReader(readFloat64, reflect.Value.SetFloat),
+	})
+	RegisterCodec("bool", TypeCodec{
+		Writer: bakeWriter(writeBool, reflect.Value.Bool),
+		Reader: bakeReader(readBool, reflect.Value.SetBool),
+	})
+	RegisterCodec("string", TypeCodec{
+		Writer: bakeWriter(writeString, reflect.Value.String),
+		Reader: bakeReader(readString, reflect.Value.SetString),
+	})
+	RegisterCodec("byte_array", TypeCodec{
+		Writer: bakeWriter(writeByteArray, reflect.Value.Bytes),
+		Reader: bakeReader(readByteArray, reflect.Value.SetBytes),
+	})
+	RegisterCodec("component", TypeCodec{
+		Writer: bakeWriter(writeChatComponent, func(value reflect.Value) ChatComponent {
+			return value.Interface().(ChatComponent)
+		}),
+		Reader: bakeReader(readChatComponent, func(value reflect.Value, val ChatComponent) {
+			value.Set(reflect.ValueOf(val))
+		}),
+	})
+	RegisterCodec("json", TypeCodec{
+		Writer: bakeWriter(writeJson, reflect.Value.Interface),
+		Reader: func(reader ByteArrayReader, value reflect.Value) error {
+			val, err := readJson(reader, value)
+			if err != nil {
+				return err
+			}
+			value.Set(val)
+			return nil
+		},
+	})
 }
