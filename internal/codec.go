@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"encoding/binary"
@@ -206,7 +206,7 @@ func writeJson(writer ByteArrayWriter, value any) error {
 	return writeByteArray(writer, jsonBytes)
 }
 
-func serializePacket(writer ByteArrayWriter, packet any) error {
+func SerializePacket(writer ByteArrayWriter, packet any) error {
 	// ValueOf returns a Value representing the run-time data
 	v := reflect.ValueOf(packet)
 	vType := v.Type()
@@ -256,7 +256,7 @@ func serializePacket(writer ByteArrayWriter, packet any) error {
 	return nil
 }
 
-func deserializePacket(reader ByteArrayReader, vType reflect.Type) (reflect.Value, error) {
+func DeserializePacket(reader ByteArrayReader, vType reflect.Type) (reflect.Value, error) {
 	packet := reflect.New(vType)
 	// ValueOf returns a Value representing the run-time data
 	for i := 0; i < vType.NumField(); i++ {
@@ -318,15 +318,4 @@ func deserializePacket(reader ByteArrayReader, vType reflect.Type) (reflect.Valu
 		}
 	}
 	return packet, nil
-}
-
-func wrapHandler[T any](mappedFunction func(client *Client, packet T) error) PacketHandler {
-	t := reflect.TypeOf(mappedFunction).In(1)
-	return func(client *Client, reader ByteArrayReader) error {
-		pp, err := deserializePacket(reader, t)
-		if err != nil {
-			return err
-		}
-		return mappedFunction(client, *(pp.Interface().(*T)))
-	}
 }

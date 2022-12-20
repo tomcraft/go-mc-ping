@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"bufio"
@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 )
-
-type PacketHandler func(client *Client, reader ByteArrayReader) error
 
 type Client struct {
 	Connection                net.Conn
@@ -35,7 +33,7 @@ type Identity struct {
 	Username string
 }
 
-func (client *Client) closeConnection() error {
+func (client *Client) CloseConnection() error {
 	if client.ConnectionActive {
 		client.ConnectionActive = false
 		if err := client.Connection.Close(); err != nil {
@@ -45,11 +43,11 @@ func (client *Client) closeConnection() error {
 	return nil
 }
 
-func (client *Client) processClient() {
-	err := client.switchProtocol(0)
+func (client *Client) ProcessClient() {
+	err := client.SwitchProtocol(0)
 	if err != nil {
 		log.Println("error switching protocol:", err)
-		if err := client.closeConnection(); err != nil {
+		if err := client.CloseConnection(); err != nil {
 			log.Println("error while closing connection:", err)
 		}
 		return
@@ -58,7 +56,7 @@ func (client *Client) processClient() {
 		for client.ConnectionActive {
 			if err := client.processPacket(); err != nil {
 				log.Println("error processing packets, closing connection:", err)
-				if err := client.closeConnection(); err != nil {
+				if err := client.CloseConnection(); err != nil {
 					log.Println("error while closing connection:", err)
 					break
 				}
@@ -68,7 +66,7 @@ func (client *Client) processClient() {
 	for client.ConnectionActive {
 		if err := client.tick(); err != nil {
 			log.Println("error ticking client, closing connection:", err)
-			if err := client.closeConnection(); err != nil {
+			if err := client.CloseConnection(); err != nil {
 				log.Println("error while closing connection:", err)
 				break
 			}
@@ -77,7 +75,7 @@ func (client *Client) processClient() {
 	}
 }
 
-func (client *Client) switchProtocol(newProtocol int) error {
+func (client *Client) SwitchProtocol(newProtocol int) error {
 	if newProtocol <= client.ProtocolState && client.ProtocolState > 0 {
 		return errors.New("invalid new protocol: unable to enter a previous state")
 	}
@@ -86,13 +84,13 @@ func (client *Client) switchProtocol(newProtocol int) error {
 	client.ProtocolState = newProtocol
 	switch newProtocol {
 	case 0:
-		client.ProtocolHandler = createHandshakeProtocol()
+		client.ProtocolHandler = CreateHandshakeProtocol()
 	case 1:
-		client.ProtocolHandler = createStatusProtocol()
+		client.ProtocolHandler = CreateStatusProtocol()
 	case 2:
-		client.ProtocolHandler = createLoginProtocol()
+		client.ProtocolHandler = CreateLoginProtocol()
 	case 3:
-		client.ProtocolHandler = createPlayProtocol()
+		client.ProtocolHandler = CreatePlayProtocol()
 	default:
 		return errors.New(fmt.Sprintf("invalid new protocol: %d", newProtocol))
 	}
@@ -119,7 +117,7 @@ func (client *Client) processPacket() error {
 	handler := client.ProtocolHandler(byte(packetId))
 
 	if handler == nil {
-		return client.disconnect(ChatComponent{Text: fmt.Sprintf("Unknown packet id %d", byte(packetId))})
+		return client.Disconnect(ChatComponent{Text: fmt.Sprintf("Unknown packet id %d", byte(packetId))})
 	}
 
 	return handler(client, &client.ReadBuffer)
@@ -129,14 +127,14 @@ func (client *Client) tick() error {
 	if client.ProtocolState == 3 {
 		now := time.Now().UnixMilli()
 		if now-client.LastSentKeepAliveTime >= 1000 {
-			if err := client.keepAlive(); err != nil {
+			if err := client.KeepAlive(); err != nil {
 				return err
 			}
 		} else if now-client.LastReceivedKeepAliveTime >= 20000 {
-			return client.disconnect(ChatComponent{Text: "Timed-out :("})
+			return client.Disconnect(ChatComponent{Text: "Timed-out :("})
 		}
 		if (now/1000)%2 == 0 {
-			if err := client.sendMessage(ChatComponent{"Coucou bb"}, 2); err != nil {
+			if err := client.SendMessage(ChatComponent{"Coucou bb"}, 2); err != nil {
 				return err
 			}
 		}
@@ -144,13 +142,13 @@ func (client *Client) tick() error {
 	return nil
 }
 
-func (client *Client) sendPacket(id byte, packet any) error {
-	return client.sendRawPacket(id, func(writer ByteArrayWriter) error {
-		return serializePacket(writer, packet)
+func (client *Client) SendPacket(id byte, packet any) error {
+	return client.SendRawPacket(id, func(writer ByteArrayWriter) error {
+		return SerializePacket(writer, packet)
 	})
 }
 
-func (client *Client) sendRawPacket(id byte, handler func(writer ByteArrayWriter) error) error {
+func (client *Client) SendRawPacket(id byte, handler func(writer ByteArrayWriter) error) error {
 	packetBuffer := bytes.Buffer{}
 
 	if err := writeVarInt(&packetBuffer, int(id)); err != nil {
@@ -170,17 +168,17 @@ func (client *Client) sendRawPacket(id byte, handler func(writer ByteArrayWriter
 	return err
 }
 
-func (client *Client) keepAlive() error {
+func (client *Client) KeepAlive() error {
 	client.LastSentKeepAliveTime = time.Now().UnixMilli()
 	client.LastKeepAlive = int(time.Now().Unix())
-	return client.sendPacket(0x00, KeepAlivePacket{client.LastKeepAlive})
+	return client.SendPacket(0x00, KeepAlivePacket{client.LastKeepAlive})
 }
 
-func (client *Client) join() error {
+func (client *Client) Join() error {
 	log.Println("sending join sequence")
 	client.LastReceivedKeepAliveTime = time.Now().UnixMilli() - 5000
 	client.LastSentKeepAliveTime = client.LastReceivedKeepAliveTime
-	if err := client.sendPacket(0x01, JoinGamePacket{
+	if err := client.SendPacket(0x01, JoinGamePacket{
 		EntityId:         1,
 		GameMode:         3,
 		Dimension:        0,
@@ -191,30 +189,30 @@ func (client *Client) join() error {
 	}); err != nil {
 		return err
 	}
-	if err := client.sendPacket(0x3F, CustomPayloadPacket{"MC|Brand", []byte("GoTOTO")}); err != nil {
+	if err := client.SendPacket(0x3F, CustomPayloadPacket{"MC|Brand", []byte("GoTOTO")}); err != nil {
 		return err
 	}
-	if err := client.sendPacket(0x08, PlayerPosLookPacket{Y: 100}); err != nil {
+	if err := client.SendPacket(0x08, PlayerPosLookPacket{Y: 100}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (client *Client) sendMessage(message ChatComponent, position byte) error {
-	return client.sendPacket(0x02, OutgoingChatPacket{message, position})
+func (client *Client) SendMessage(message ChatComponent, position byte) error {
+	return client.SendPacket(0x02, OutgoingChatPacket{message, position})
 }
 
-func (client *Client) disconnect(message ChatComponent) error {
+func (client *Client) Disconnect(message ChatComponent) error {
 	log.Println("disconnecting client for reason: " + message.Text)
 	if client.ProtocolState == 0 || client.ProtocolState == 1 {
-		return client.closeConnection()
+		return client.CloseConnection()
 	}
 	packetId := byte(0x00)
 	if client.ProtocolState == 3 {
 		packetId = byte(0x40)
 	}
-	if err := client.sendPacket(packetId, DisconnectPacket{message}); err != nil {
+	if err := client.SendPacket(packetId, DisconnectPacket{message}); err != nil {
 		return err
 	}
-	return client.closeConnection()
+	return client.CloseConnection()
 }

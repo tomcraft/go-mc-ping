@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"fmt"
@@ -39,10 +39,10 @@ type CustomPayloadPacket struct {
 	Payload []byte `packet:"byte_array"`
 }
 
-func createPlayProtocol() func(packetId byte) PacketHandler {
+func CreatePlayProtocol() func(packetId byte) PacketHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = wrapHandler(handleKeepAlive)
-	handlers[0x01] = wrapHandler(handleTextInput)
+	handlers[0x00] = AutoHandler(handleKeepAlive)
+	handlers[0x01] = AutoHandler(handleTextInput)
 	defaultHandler := func(client *Client, reader ByteArrayReader) error {
 		return nil
 	}
@@ -63,5 +63,5 @@ func handleKeepAlive(client *Client, packet KeepAlivePacket) error {
 }
 
 func handleTextInput(client *Client, packet IncomingChatPacket) error {
-	return client.sendMessage(ChatComponent{Text: fmt.Sprintf("<%s> %s", client.Identity.Username, packet.Text)}, 0)
+	return client.SendMessage(ChatComponent{Text: fmt.Sprintf("<%s> %s", client.Identity.Username, packet.Text)}, 0)
 }

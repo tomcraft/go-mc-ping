@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"crypto/md5"
@@ -19,9 +19,9 @@ type LoginFinishPacket struct {
 	Username string `packet:"string"`
 }
 
-func createLoginProtocol() func(packetId byte) PacketHandler {
+func CreateLoginProtocol() func(packetId byte) PacketHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = wrapHandler(handleLoginStart)
+	handlers[0x00] = AutoHandler(handleLoginStart)
 	return func(packetId byte) PacketHandler {
 		return handlers[packetId]
 	}
@@ -46,13 +46,13 @@ func handleLoginStart(client *Client, packet LoginStartPacket) error {
 	log.Println("Answering to login start")
 
 	client.Identity = &Identity{createOfflineUuid(packet.Username), packet.Username}
-	if err := client.sendPacket(0x02, LoginFinishPacket{client.Identity.Uuid, client.Identity.Username}); err != nil {
+	if err := client.SendPacket(0x02, LoginFinishPacket{client.Identity.Uuid, client.Identity.Username}); err != nil {
 		return err
 	}
 
-	if err := client.switchProtocol(3); err != nil {
+	if err := client.SwitchProtocol(3); err != nil {
 		return err
 	}
 
-	return client.join()
+	return client.Join()
 }

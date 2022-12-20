@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"fmt"
@@ -13,9 +13,9 @@ type HandshakePacket struct {
 	RequestedState  int    `packet:"varint"`
 }
 
-func createHandshakeProtocol() func(packetId byte) PacketHandler {
+func CreateHandshakeProtocol() func(packetId byte) PacketHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = wrapHandler(handleHandshake)
+	handlers[0x00] = AutoHandler(handleHandshake)
 	return func(packetId byte) PacketHandler {
 		return handlers[packetId]
 	}
@@ -31,5 +31,5 @@ func handleHandshake(client *Client, packet HandshakePacket) error {
 
 	client.ProtocolVersion = packet.ProtocolVersion
 	client.VirtualHost = fmt.Sprintf("%s:%d", packet.ServerAddress, packet.ServerPort)
-	return client.switchProtocol(packet.RequestedState)
+	return client.SwitchProtocol(packet.RequestedState)
 }

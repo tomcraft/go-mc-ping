@@ -1,6 +1,7 @@
 package main
 
 import (
+	"_tomcraft/go-mc-ping/internal"
 	"bufio"
 	"log"
 	"net"
@@ -31,11 +32,11 @@ func main() {
 			continue
 		}
 		log.Println("Client connected")
-		client := Client{
+		client := internal.Client{
 			Connection:       connection,
 			ConnectionReader: bufio.NewReader(connection),
 			ConnectionActive: true,
 		}
-		go client.processClient()
+		go client.ProcessClient()
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"encoding/base64"
@@ -14,10 +14,6 @@ type StatusVersion struct {
 type StatusPlayers struct {
 	Max    int `json:"max"`
 	Online int `json:"online"`
-}
-
-type ChatComponent struct {
-	Text string `json:"text"`
 }
 
 type StatusResponse struct {
@@ -47,10 +43,10 @@ func readFavicon(file string) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
 }
 
-func createStatusProtocol() func(packetId byte) PacketHandler {
+func CreateStatusProtocol() func(packetId byte) PacketHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = wrapHandler(handleStatusRequest)
-	handlers[0x01] = wrapHandler(handlePingRequest)
+	handlers[0x00] = AutoHandler(handleStatusRequest)
+	handlers[0x01] = AutoHandler(handlePingRequest)
 	return func(packetId byte) PacketHandler {
 		return handlers[packetId]
 	}
@@ -67,15 +63,15 @@ func handleStatusRequest(client *Client, _ EmptyPacket) error {
 		Description: ChatComponent{Text: "§cCoucou §bles §anoobs"},
 		Favicon:     favicon,
 	}
-	return client.sendPacket(0x00, StatusResponsePacket{response})
+	return client.SendPacket(0x00, StatusResponsePacket{response})
 }
 
 func handlePingRequest(client *Client, packet PingPacket) error {
 	log.Println("Answering to ping request")
 
-	if err := client.sendPacket(0x01, packet); err != nil {
+	if err := client.SendPacket(0x01, packet); err != nil {
 		return err
 	}
 
-	return client.closeConnection()
+	return client.CloseConnection()
 }
