@@ -39,20 +39,13 @@ type CustomPayloadPacket struct {
 	Payload []byte `packet:"byte_array"`
 }
 
-func CreatePlayProtocol() func(packetId byte) PacketHandler {
+func CreatePlayProtocol() ProtocolHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = AutoHandler(handleKeepAlive)
-	handlers[0x01] = AutoHandler(handleTextInput)
-	defaultHandler := func(client *Client, reader ByteArrayReader) error {
+	handlers[0x00] = AutoPacketHandler(handleKeepAlive)
+	handlers[0x01] = AutoPacketHandler(handleTextInput)
+	return MapProtocolHandlerWithDefault(handlers, func(client *Client, reader ByteArrayReader) error {
 		return nil
-	}
-	return func(packetId byte) PacketHandler {
-		handler, ok := handlers[packetId]
-		if ok {
-			return handler
-		}
-		return defaultHandler
-	}
+	})
 }
 
 func handleKeepAlive(client *Client, packet *KeepAlivePacket) error {

@@ -13,12 +13,10 @@ type HandshakePacket struct {
 	RequestedState  int    `packet:"varint"`
 }
 
-func CreateHandshakeProtocol() func(packetId byte) PacketHandler {
+func CreateHandshakeProtocol() ProtocolHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = AutoHandler(handleHandshake)
-	return func(packetId byte) PacketHandler {
-		return handlers[packetId]
-	}
+	handlers[0x00] = AutoPacketHandler(handleHandshake)
+	return MapProtocolHandler(handlers)
 }
 
 func handleHandshake(client *Client, packet *HandshakePacket) error {

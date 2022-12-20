@@ -19,12 +19,10 @@ type LoginFinishPacket struct {
 	Username string `packet:"string"`
 }
 
-func CreateLoginProtocol() func(packetId byte) PacketHandler {
+func CreateLoginProtocol() ProtocolHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = AutoHandler(handleLoginStart)
-	return func(packetId byte) PacketHandler {
-		return handlers[packetId]
-	}
+	handlers[0x00] = AutoPacketHandler(handleLoginStart)
+	return MapProtocolHandler(handlers)
 }
 
 func createOfflineUuid(username string) string {

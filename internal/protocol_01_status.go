@@ -43,13 +43,11 @@ func readFavicon(file string) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
 }
 
-func CreateStatusProtocol() func(packetId byte) PacketHandler {
+func CreateStatusProtocol() ProtocolHandler {
 	handlers := make(map[byte]PacketHandler)
-	handlers[0x00] = AutoHandler(handleStatusRequest)
-	handlers[0x01] = AutoHandler(handlePingRequest)
-	return func(packetId byte) PacketHandler {
-		return handlers[packetId]
-	}
+	handlers[0x00] = AutoPacketHandler(handleStatusRequest)
+	handlers[0x01] = AutoPacketHandler(handlePingRequest)
+	return MapProtocolHandler(handlers)
 }
 
 func handleStatusRequest(client *Client, _ *EmptyPacket) error {

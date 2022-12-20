@@ -20,7 +20,7 @@ type Client struct {
 	SendLock                  sync.Mutex
 	ProtocolVersion           int
 	ProtocolState             int
-	ProtocolHandler           func(packetId byte) PacketHandler
+	ProtocolHandler           ProtocolHandler
 	VirtualHost               string
 	Identity                  *Identity
 	LastKeepAlive             int
@@ -46,13 +46,13 @@ func (client *Client) CloseConnection() error {
 func (client *Client) ProcessClient() {
 	client.ConnectionReader = bufio.NewReader(client.Connection)
 	client.ConnectionActive = true
-	err := client.SwitchProtocol(0)
-	if err != nil {
-		log.Println("error switching protocol:", err)
+	client.ProtocolState = -1
+	if err := client.SwitchProtocol(0); err != nil {
+		log.Println("error switching protocol, closing connection:", err)
 		if err := client.CloseConnection(); err != nil {
 			log.Println("error while closing connection:", err)
+			return
 		}
-		return
 	}
 	go func() {
 		for client.ConnectionActive {
@@ -78,21 +78,14 @@ func (client *Client) ProcessClient() {
 }
 
 func (client *Client) SwitchProtocol(newProtocol int) error {
-	if newProtocol <= client.ProtocolState && client.ProtocolState > 0 {
-		return errors.New("invalid new protocol: unable to enter a previous state")
-	}
-	log.Printf("switching to protocol %d\n", newProtocol)
-
-	client.ProtocolState = newProtocol
 	switch newProtocol {
-	case 0:
-		client.ProtocolHandler = CreateHandshakeProtocol()
-	case 1:
-		client.ProtocolHandler = CreateStatusProtocol()
-	case 2:
-		client.ProtocolHandler = CreateLoginProtocol()
-	case 3:
-		client.ProtocolHandler = CreatePlayProtocol()
+	case 0, 1, 2, 3:
+		if newProtocol <= client.ProtocolState {
+			return errors.New("invalid new protocol: unable to enter a previous state")
+		}
+		log.Printf("switching to protocol %d\n", newProtocol)
+		client.ProtocolState = newProtocol
+		client.ProtocolHandler = DefinedProtocols[newProtocol]
 	default:
 		return errors.New(fmt.Sprintf("invalid new protocol: %d", newProtocol))
 	}
