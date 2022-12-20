@@ -42,7 +42,7 @@ func createOfflineUuid(username string) string {
 	)
 }
 
-func handleLoginStart(client *Client, packet LoginStartPacket) error {
+func handleLoginStart(client *Client, packet *LoginStartPacket) error {
 	log.Println("Answering to login start")
 
 	client.Identity = &Identity{createOfflineUuid(packet.Username), packet.Username}

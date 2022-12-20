@@ -44,6 +44,8 @@ func (client *Client) CloseConnection() error {
 }
 
 func (client *Client) ProcessClient() {
+	client.ConnectionReader = bufio.NewReader(client.Connection)
+	client.ConnectionActive = true
 	err := client.SwitchProtocol(0)
 	if err != nil {
 		log.Println("error switching protocol:", err)

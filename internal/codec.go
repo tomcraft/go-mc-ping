@@ -207,45 +207,48 @@ func writeJson(writer ByteArrayWriter, value any) error {
 }
 
 func SerializePacket(writer ByteArrayWriter, packet any) error {
-	// ValueOf returns a Value representing the run-time data
-	v := reflect.ValueOf(packet)
-	vType := v.Type()
-	for i := 0; i < v.NumField(); i++ {
+	packetValue := reflect.ValueOf(packet)
+	if packetValue.Kind() == reflect.Ptr {
+		packetValue = packetValue.Elem()
+	}
+	packetType := packetValue.Type()
+	for i := 0; i < packetType.NumField(); i++ {
 		// Get the field tag value
-		tag := vType.Field(i).Tag.Get("packet")
+		field := packetType.Field(i)
+		tag := field.Tag.Get("packet")
 		// Skip if tag is not defined or ignored
 		if tag == "" || tag == "-" {
 			continue
 		}
-		vValue := v.Field(i)
+		fieldValue := packetValue.Field(i)
 		var err error
 		switch tag {
 		case "int8":
-			err = writeInt8(writer, int8(vValue.Int()))
+			err = writeInt8(writer, int8(fieldValue.Int()))
 		case "byte":
-			err = writeByte(writer, byte(vValue.Uint()))
+			err = writeByte(writer, byte(fieldValue.Uint()))
 		case "varint":
-			err = writeVarInt(writer, int(vValue.Int()))
+			err = writeVarInt(writer, int(fieldValue.Int()))
 		case "int":
-			err = writeInt(writer, int(vValue.Int()))
+			err = writeInt(writer, int(fieldValue.Int()))
 		case "int16":
-			err = writeInt16(writer, int16(vValue.Int()))
+			err = writeInt16(writer, int16(fieldValue.Int()))
 		case "int64":
-			err = writeInt64(writer, vValue.Int())
+			err = writeInt64(writer, fieldValue.Int())
 		case "float":
-			err = writeFloat(writer, float32(vValue.Float()))
+			err = writeFloat(writer, float32(fieldValue.Float()))
 		case "float64":
-			err = writeFloat64(writer, vValue.Float())
+			err = writeFloat64(writer, fieldValue.Float())
 		case "string":
-			err = writeString(writer, vValue.String())
+			err = writeString(writer, fieldValue.String())
 		case "byte_array":
-			err = writeByteArray(writer, vValue.Bytes())
+			err = writeByteArray(writer, fieldValue.Bytes())
 		case "bool":
-			err = writeBool(writer, vValue.Bool())
+			err = writeBool(writer, fieldValue.Bool())
 		case "component":
-			err = writeChatComponent(writer, vValue.Interface().(ChatComponent))
+			err = writeChatComponent(writer, fieldValue.Interface().(ChatComponent))
 		case "json":
-			err = writeJson(writer, vValue.Interface())
+			err = writeJson(writer, fieldValue.Interface())
 		default:
 			err = errors.New("unknown serializer type: " + tag)
 		}
@@ -256,66 +259,67 @@ func SerializePacket(writer ByteArrayWriter, packet any) error {
 	return nil
 }
 
-func DeserializePacket(reader ByteArrayReader, vType reflect.Type) (reflect.Value, error) {
-	packet := reflect.New(vType)
-	// ValueOf returns a Value representing the run-time data
-	for i := 0; i < vType.NumField(); i++ {
+func DeserializePacket(reader ByteArrayReader, packetType reflect.Type) (reflect.Value, error) {
+	packetPtr := reflect.New(packetType)
+	packetValue := packetPtr.Elem()
+	for i := 0; i < packetType.NumField(); i++ {
 		// Get the field tag value
-		tag := vType.Field(i).Tag.Get("packet")
+		field := packetType.Field(i)
+		tag := field.Tag.Get("packet")
 		// Skip if tag is not defined or ignored
 		if tag == "" || tag == "-" {
 			continue
 		}
-		vValue := packet.Elem().Field(i)
+		fieldValue := packetValue.Field(i)
 		var err error
 		var val any
 		switch tag {
 		case "int8":
 			val, err = readInt8(reader)
-			vValue.SetInt(int64(val.(int8)))
+			fieldValue.SetInt(int64(val.(int8)))
 		case "byte":
 			val, err = readByte(reader)
-			vValue.SetUint(uint64(val.(byte)))
+			fieldValue.SetUint(uint64(val.(byte)))
 		case "varint":
 			val, err = readVarInt(reader)
-			vValue.SetInt(int64(val.(int)))
+			fieldValue.SetInt(int64(val.(int)))
 		case "int":
 			val, err = readInt(reader)
-			vValue.SetInt(int64(val.(int)))
+			fieldValue.SetInt(int64(val.(int)))
 		case "int16":
 			val, err = readInt16(reader)
-			vValue.SetInt(int64(val.(int16)))
+			fieldValue.SetInt(int64(val.(int16)))
 		case "int64":
 			val, err = readInt64(reader)
-			vValue.SetInt(val.(int64))
+			fieldValue.SetInt(val.(int64))
 		case "float":
 			val, err = readFloat(reader)
-			vValue.SetFloat(float64(val.(float32)))
+			fieldValue.SetFloat(float64(val.(float32)))
 		case "float64":
 			val, err = readFloat64(reader)
-			vValue.SetFloat(val.(float64))
+			fieldValue.SetFloat(val.(float64))
 		case "string":
 			val, err = readString(reader)
-			vValue.SetString(val.(string))
+			fieldValue.SetString(val.(string))
 		case "byte_array":
 			val, err = readByteArray(reader)
-			vValue.SetBytes(val.([]byte))
+			fieldValue.SetBytes(val.([]byte))
 		case "bool":
 			val, err = readBool(reader)
-			vValue.SetBool(val.(bool))
+			fieldValue.SetBool(val.(bool))
 		case "component":
 			val, err = readChatComponent(reader)
-			vValue.Set(reflect.ValueOf(val))
+			fieldValue.Set(reflect.ValueOf(val))
 		case "json":
-			reflectVal := reflect.New(vValue.Type())
+			reflectVal := reflect.New(fieldValue.Type())
 			val, err = readJson(reader, reflectVal)
-			vValue.Set(reflectVal)
+			fieldValue.Set(reflectVal)
 		default:
 			err = errors.New("unknown serializer type: " + tag)
 		}
 		if err != nil {
-			return packet, err
+			return packetPtr, err
 		}
 	}
-	return packet, nil
+	return packetPtr, nil
 }

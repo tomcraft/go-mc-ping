@@ -21,7 +21,7 @@ func CreateHandshakeProtocol() func(packetId byte) PacketHandler {
 	}
 }
 
-func handleHandshake(client *Client, packet HandshakePacket) error {
+func handleHandshake(client *Client, packet *HandshakePacket) error {
 	log.Println("Answering handshake")
 
 	index := strings.Index(packet.ServerAddress, "\000")

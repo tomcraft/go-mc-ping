@@ -52,7 +52,7 @@ func CreateStatusProtocol() func(packetId byte) PacketHandler {
 	}
 }
 
-func handleStatusRequest(client *Client, _ EmptyPacket) error {
+func handleStatusRequest(client *Client, _ *EmptyPacket) error {
 	log.Println("Answering to status request")
 	response := StatusResponse{
 		Version: StatusVersion{
@@ -66,7 +66,7 @@ func handleStatusRequest(client *Client, _ EmptyPacket) error {
 	return client.SendPacket(0x00, StatusResponsePacket{response})
 }
 
-func handlePingRequest(client *Client, packet PingPacket) error {
+func handlePingRequest(client *Client, packet *PingPacket) error {
 	log.Println("Answering to ping request")
 
 	if err := client.SendPacket(0x01, packet); err != nil {

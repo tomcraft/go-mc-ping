@@ -55,13 +55,13 @@ func CreatePlayProtocol() func(packetId byte) PacketHandler {
 	}
 }
 
-func handleKeepAlive(client *Client, packet KeepAlivePacket) error {
+func handleKeepAlive(client *Client, packet *KeepAlivePacket) error {
 	if packet.RandomId == client.LastKeepAlive {
 		client.LastReceivedKeepAliveTime = time.Now().UnixMilli()
 	}
 	return nil
 }
 
-func handleTextInput(client *Client, packet IncomingChatPacket) error {
+func handleTextInput(client *Client, packet *IncomingChatPacket) error {
 	return client.SendMessage(ChatComponent{Text: fmt.Sprintf("<%s> %s", client.Identity.Username, packet.Text)}, 0)
 }

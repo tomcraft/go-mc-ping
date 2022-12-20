@@ -10,13 +10,13 @@ type ChatComponent struct {
 
 type PacketHandler func(client *Client, reader ByteArrayReader) error
 
-func AutoHandler[T any](mappedFunction func(client *Client, packet T) error) PacketHandler {
-	t := reflect.TypeOf(mappedFunction).In(1)
+func AutoHandler[T any](mappedFunction func(client *Client, packet *T) error) PacketHandler {
+	t := reflect.TypeOf(mappedFunction).In(1).Elem()
 	return func(client *Client, reader ByteArrayReader) error {
-		pp, err := DeserializePacket(reader, t)
+		ptr, err := DeserializePacket(reader, t)
 		if err != nil {
 			return err
 		}
-		return mappedFunction(client, *(pp.Interface().(*T)))
+		return mappedFunction(client, ptr.Interface().(*T))
 	}
 }
