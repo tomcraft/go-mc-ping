@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"sync"
 )
 
 type ByteArrayReader interface {
@@ -25,10 +26,43 @@ type TypeCodec struct {
 	Reader func(reader ByteArrayReader, value reflect.Value) error
 }
 
-var typeCodecs = make(map[string]TypeCodec)
+type PacketCodec []*TypeCodec
+
+var typeCodecs = make(map[string]*TypeCodec)
+var packetCodecs = make(map[reflect.Type]*PacketCodec)
+var registrationLock sync.Mutex
 
 func RegisterCodec(name string, codec TypeCodec) {
-	typeCodecs[name] = codec
+	typeCodecs[name] = &codec
+}
+
+func RegisterPacketCodec(packetType reflect.Type) (*PacketCodec, error) {
+	numFields := packetType.NumField()
+	codecs := make(PacketCodec, numFields)
+	for i := 0; i < numFields; i++ {
+		field := packetType.Field(i)
+		tag := field.Tag.Get("packet")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		codec, ok := typeCodecs[tag]
+		if !ok {
+			return &codecs, errors.New("unknown serializer type: " + tag)
+		}
+		codecs[i] = codec
+	}
+	packetCodecs[packetType] = &codecs
+	return &codecs, nil
+}
+
+func GetOrRegisterPacketCodec(packetType reflect.Type) (*PacketCodec, error) {
+	codec, ok := packetCodecs[packetType]
+	if !ok {
+		registrationLock.Lock()
+		defer registrationLock.Unlock()
+		return RegisterPacketCodec(packetType)
+	}
+	return codec, nil
 }
 
 func readInt8(reader ByteArrayReader) (int8, error) {
@@ -66,79 +100,74 @@ func writeVarInt(writer ByteArrayWriter, value int) error {
 	return writer.WriteByte(byte(value))
 }
 
-func readInt(reader ByteArrayReader) (int, error) {
-	array := make([]byte, 4)
-	if _, err := reader.Read(array); err != nil {
-		return 0, err
+func readAnyInt[T constraints.Integer](reader ByteArrayReader, size int) (T, error) {
+	var val uint64
+	for i := 0; i < size; i++ {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return 0, nil
+		}
+		val |= uint64(b&0xFF) << i * 8
 	}
-	return int(binary.BigEndian.Uint32(array)), nil
+	return T(val), nil
+}
+
+func writeAnyInt[T constraints.Integer](writer ByteArrayWriter, value T, size int) error {
+	for i := 0; i < size; i++ {
+		if err := writer.WriteByte(byte(value)); err != nil {
+			return err
+		}
+		value >>= 8
+	}
+	return nil
+}
+
+func readInt(reader ByteArrayReader) (int, error) {
+	return readAnyInt[int](reader, 4)
 }
 
 func writeInt(writer ByteArrayWriter, value int) error {
-	array := make([]byte, 4)
-	binary.BigEndian.PutUint32(array, uint32(value))
-	_, err := writer.Write(array)
-	return err
+	return writeAnyInt[int](writer, value, 4)
 }
 
 func readInt16(reader ByteArrayReader) (int16, error) {
-	array := make([]byte, 2)
-	if _, err := reader.Read(array); err != nil {
-		return 0, err
-	}
-	return int16(binary.BigEndian.Uint16(array)), nil
+	return readAnyInt[int16](reader, 2)
 }
 
 func writeInt16(writer ByteArrayWriter, value int16) error {
-	array := make([]byte, 2)
-	binary.BigEndian.PutUint16(array, uint16(value))
-	_, err := writer.Write(array)
-	return err
+	return writeAnyInt[int16](writer, value, 2)
 }
 
 func readInt64(reader ByteArrayReader) (int64, error) {
-	array := make([]byte, 8)
-	if _, err := reader.Read(array); err != nil {
-		return 0, err
-	}
-	return int64(binary.BigEndian.Uint64(array)), nil
+	return readAnyInt[int64](reader, 8)
 }
 
 func writeInt64(writer ByteArrayWriter, value int64) error {
-	array := make([]byte, 8)
-	binary.BigEndian.PutUint64(array, uint64(value))
-	_, err := writer.Write(array)
-	return err
+	return writeAnyInt[int64](writer, value, 8)
 }
 
 func readFloat(reader ByteArrayReader) (float32, error) {
-	array := make([]byte, 4)
-	if _, err := reader.Read(array); err != nil {
+	val, err := readAnyInt[uint32](reader, 4)
+	if err != nil {
 		return 0, err
 	}
-	return math.Float32frombits(binary.BigEndian.Uint32(array)), nil
+	return math.Float32frombits(val), nil
 }
 
 func writeFloat(writer ByteArrayWriter, value float32) error {
-	array := make([]byte, 4)
-	binary.BigEndian.PutUint32(array, math.Float32bits(value))
-	_, err := writer.Write(array)
-	return err
+	return writeAnyInt[uint32](writer, math.Float32bits(value), 4)
 }
 
 func readFloat64(reader ByteArrayReader) (float64, error) {
-	array := make([]byte, 8)
-	if _, err := reader.Read(array); err != nil {
+	val, err := readAnyInt[uint64](reader, 8)
+	if err != nil {
 		return 0, err
 	}
-	return math.Float64frombits(binary.BigEndian.Uint64(array)), nil
+	return math.Float64frombits(val), nil
 }
 
 func writeFloat64(writer ByteArrayWriter, value float64) error {
-	array := make([]byte, 8)
-	binary.BigEndian.PutUint64(array, math.Float64bits(value))
-	_, err := writer.Write(array)
-	return err
+	return writeAnyInt[uint64](writer, math.Float64bits(value), 8)
 }
 
 func readString(reader ByteArrayReader) (string, error) {
@@ -224,19 +253,15 @@ func SerializePacket(writer ByteArrayWriter, packet any) error {
 		packetValue = packetValue.Elem()
 	}
 	packetType := packetValue.Type()
-	for i := 0; i < packetType.NumField(); i++ {
-		// Get the field tag value
-		field := packetType.Field(i)
-		tag := field.Tag.Get("packet")
-		// Skip if tag is not defined or ignored
-		if tag == "" || tag == "-" {
+	packetCodec, err := GetOrRegisterPacketCodec(packetType)
+	if err != nil {
+		return err
+	}
+	for i, codec := range *packetCodec {
+		if codec == nil {
 			continue
 		}
 		fieldValue := packetValue.Field(i)
-		codec, ok := typeCodecs[tag]
-		if !ok {
-			return errors.New("unknown serializer type: " + tag)
-		}
 		if err := codec.Writer(writer, fieldValue); err != nil {
 			return err
 		}
@@ -246,21 +271,16 @@ func SerializePacket(writer ByteArrayWriter, packet any) error {
 
 func DeserializePacket(reader ByteArrayReader, packetType reflect.Type) (reflect.Value, error) {
 	packetPtr := reflect.New(packetType)
+	packetCodec, err := GetOrRegisterPacketCodec(packetType)
+	if err != nil {
+		return packetPtr, err
+	}
 	packetValue := packetPtr.Elem()
-	for i := 0; i < packetType.NumField(); i++ {
-		// Get the field tag value
-		field := packetType.Field(i)
-		tag := field.Tag.Get("packet")
-		// Skip if tag is not defined or ignored
-		if tag == "" || tag == "-" {
+	for i, codec := range *packetCodec {
+		if codec == nil {
 			continue
 		}
-
 		fieldValue := packetValue.Field(i)
-		codec, ok := typeCodecs[tag]
-		if !ok {
-			return packetPtr, errors.New("unknown serializer type: " + tag)
-		}
 		if err := codec.Reader(reader, fieldValue); err != nil {
 			return packetPtr, err
 		}
@@ -268,13 +288,13 @@ func DeserializePacket(reader ByteArrayReader, packetType reflect.Type) (reflect
 	return packetPtr, nil
 }
 
-func bakeWriter[T any](writeFn func(ByteArrayWriter, T) error, getterFn func(reflect.Value) T) func(ByteArrayWriter, reflect.Value) error {
+func createWriter[T any](writeFn func(ByteArrayWriter, T) error, getterFn func(reflect.Value) T) func(ByteArrayWriter, reflect.Value) error {
 	return func(writer ByteArrayWriter, value reflect.Value) error {
 		return writeFn(writer, getterFn(value))
 	}
 }
 
-func bakeReader[T any](readFn func(ByteArrayReader) (T, error), setterFn func(reflect.Value, T)) func(ByteArrayReader, reflect.Value) error {
+func createReader[T any](readFn func(ByteArrayReader) (T, error), setterFn func(reflect.Value, T)) func(ByteArrayReader, reflect.Value) error {
 	return func(reader ByteArrayReader, value reflect.Value) error {
 		val, err := readFn(reader)
 		if err != nil {
@@ -285,75 +305,71 @@ func bakeReader[T any](readFn func(ByteArrayReader) (T, error), setterFn func(re
 	}
 }
 
-func bakeIntWriter[T constraints.Signed](writeFn func(ByteArrayWriter, T) error) func(ByteArrayWriter, reflect.Value) error {
-	return bakeWriter(writeFn, func(value reflect.Value) T {
-		return T(value.Int())
-	})
-}
-
-func bakeIntReader[T constraints.Signed](readFn func(ByteArrayReader) (T, error)) func(ByteArrayReader, reflect.Value) error {
-	return bakeReader(readFn, func(value reflect.Value, val T) {
-		value.SetInt(int64(val))
-	})
-}
-
-func bakeIntCodec[T constraints.Signed](writeFn func(ByteArrayWriter, T) error, readFn func(ByteArrayReader) (T, error)) TypeCodec {
+func createCodec[T any](writeFn func(ByteArrayWriter, T) error, readFn func(ByteArrayReader) (T, error), getterFn func(reflect.Value) T, setterFn func(reflect.Value, T)) TypeCodec {
 	return TypeCodec{
-		Writer: bakeIntWriter(writeFn),
-		Reader: bakeIntReader(readFn),
+		Writer: createWriter[T](writeFn, getterFn),
+		Reader: createReader[T](readFn, setterFn),
+	}
+}
+
+func createIntCodec[T constraints.Signed](writeFn func(ByteArrayWriter, T) error, readFn func(ByteArrayReader) (T, error)) TypeCodec {
+	return TypeCodec{
+		Writer: func(writer ByteArrayWriter, value reflect.Value) error {
+			return writeFn(writer, T(value.Int()))
+		},
+		Reader: createReader[T](readFn, func(value reflect.Value, val T) {
+			value.SetInt(int64(val))
+		}),
+	}
+}
+
+func createUnsignedIntCodec[T constraints.Unsigned](writeFn func(ByteArrayWriter, T) error, readFn func(ByteArrayReader) (T, error)) TypeCodec {
+	return TypeCodec{
+		Writer: func(writer ByteArrayWriter, value reflect.Value) error {
+			return writeFn(writer, T(value.Uint()))
+		},
+		Reader: createReader[T](readFn, func(value reflect.Value, val T) {
+			value.SetUint(uint64(val))
+		}),
+	}
+}
+
+func createFloatCodec[T constraints.Float](writeFn func(ByteArrayWriter, T) error, readFn func(ByteArrayReader) (T, error)) TypeCodec {
+	return TypeCodec{
+		Writer: func(writer ByteArrayWriter, value reflect.Value) error {
+			return writeFn(writer, T(value.Float()))
+		},
+		Reader: createReader[T](readFn, func(value reflect.Value, val T) {
+			value.SetFloat(float64(val))
+		}),
 	}
 }
 
 func init() {
-	RegisterCodec("byte", TypeCodec{
-		Writer: bakeWriter(writeByte, func(value reflect.Value) byte {
-			return byte(value.Uint())
-		}),
-		Reader: bakeReader(readByte, func(value reflect.Value, val byte) {
-			value.SetUint(uint64(val))
-		}),
-	})
+	RegisterCodec("byte", createUnsignedIntCodec[byte](writeByte, readByte))
+	RegisterCodec("int8", createIntCodec[int8](writeInt8, readInt8))
+	RegisterCodec("int16", createIntCodec[int16](writeInt16, readInt16))
+	RegisterCodec("int", createIntCodec[int](writeInt, readInt))
+	RegisterCodec("int64", createCodec[int64](writeInt64, readInt64, reflect.Value.Int, reflect.Value.SetInt))
+	RegisterCodec("varint", createIntCodec[int](writeVarInt, readVarInt))
 
-	RegisterCodec("int8", bakeIntCodec(writeInt8, readInt8))
-	RegisterCodec("int16", bakeIntCodec(writeInt16, readInt16))
-	RegisterCodec("int", bakeIntCodec(writeInt, readInt))
-	RegisterCodec("int64", bakeIntCodec(writeInt64, readInt64))
-	RegisterCodec("varint", bakeIntCodec(writeVarInt, readVarInt))
+	RegisterCodec("float", createFloatCodec[float32](writeFloat, readFloat))
+	RegisterCodec("float64", createCodec[float64](writeFloat64, readFloat64, reflect.Value.Float, reflect.Value.SetFloat))
 
-	RegisterCodec("float", TypeCodec{
-		Writer: bakeWriter(writeFloat, func(value reflect.Value) float32 {
-			return float32(value.Float())
-		}),
-		Reader: bakeReader(readFloat, func(value reflect.Value, val float32) {
-			value.SetFloat(float64(val))
-		}),
-	})
-	RegisterCodec("float64", TypeCodec{
-		Writer: bakeWriter(writeFloat64, reflect.Value.Float),
-		Reader: bakeReader(readFloat64, reflect.Value.SetFloat),
-	})
-	RegisterCodec("bool", TypeCodec{
-		Writer: bakeWriter(writeBool, reflect.Value.Bool),
-		Reader: bakeReader(readBool, reflect.Value.SetBool),
-	})
-	RegisterCodec("string", TypeCodec{
-		Writer: bakeWriter(writeString, reflect.Value.String),
-		Reader: bakeReader(readString, reflect.Value.SetString),
-	})
-	RegisterCodec("byte_array", TypeCodec{
-		Writer: bakeWriter(writeByteArray, reflect.Value.Bytes),
-		Reader: bakeReader(readByteArray, reflect.Value.SetBytes),
-	})
+	RegisterCodec("bool", createCodec[bool](writeBool, readBool, reflect.Value.Bool, reflect.Value.SetBool))
+	RegisterCodec("string", createCodec[string](writeString, readString, reflect.Value.String, reflect.Value.SetString))
+	RegisterCodec("byte_array", createCodec[[]byte](writeByteArray, readByteArray, reflect.Value.Bytes, reflect.Value.SetBytes))
+
 	RegisterCodec("component", TypeCodec{
-		Writer: bakeWriter(writeChatComponent, func(value reflect.Value) ChatComponent {
+		Writer: createWriter(writeChatComponent, func(value reflect.Value) ChatComponent {
 			return value.Interface().(ChatComponent)
 		}),
-		Reader: bakeReader(readChatComponent, func(value reflect.Value, val ChatComponent) {
+		Reader: createReader(readChatComponent, func(value reflect.Value, val ChatComponent) {
 			value.Set(reflect.ValueOf(val))
 		}),
 	})
 	RegisterCodec("json", TypeCodec{
-		Writer: bakeWriter(writeJson, reflect.Value.Interface),
+		Writer: createWriter(writeJson, reflect.Value.Interface),
 		Reader: func(reader ByteArrayReader, value reflect.Value) error {
 			val, err := readJson(reader, value)
 			if err != nil {
