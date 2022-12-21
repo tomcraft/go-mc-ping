@@ -1,26 +1,23 @@
 package internal
 
 import (
+	"_tomcraft/go-mc-ping/internal/codec"
 	"reflect"
 )
 
-type ChatComponent struct {
-	Text string `json:"text"`
-}
-
 var DefinedProtocols []ProtocolHandler
 
-type PacketHandler func(client *Client, reader ByteArrayReader) error
+type PacketHandler func(client *Client, reader codec.ByteArrayReader) error
 type ProtocolHandler func(packetId byte) PacketHandler
 
 func AutoPacketHandler[T any](mappedFunction func(client *Client, packet *T) error) PacketHandler {
 	t := reflect.TypeOf(mappedFunction).In(1).Elem()
-	return func(client *Client, reader ByteArrayReader) error {
-		ptr, err := DeserializePacket(reader, t)
+	return func(client *Client, reader codec.ByteArrayReader) error {
+		ptr, err := codec.DeserializePacket[T](reader, t)
 		if err != nil {
 			return err
 		}
-		return mappedFunction(client, ptr.Interface().(*T))
+		return mappedFunction(client, ptr)
 	}
 }
 

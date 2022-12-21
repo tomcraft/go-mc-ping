@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"_tomcraft/go-mc-ping/internal/types"
 	"encoding/base64"
 	"log"
 	"os"
@@ -17,10 +18,10 @@ type StatusPlayers struct {
 }
 
 type StatusResponse struct {
-	Version     StatusVersion `json:"version"`
-	Players     StatusPlayers `json:"players"`
-	Description ChatComponent `json:"description"`
-	Favicon     string        `json:"favicon"`
+	Version     StatusVersion       `json:"version"`
+	Players     StatusPlayers       `json:"players"`
+	Description types.ChatComponent `json:"description"`
+	Favicon     string              `json:"favicon"`
 }
 
 type EmptyPacket struct{}
@@ -55,10 +56,10 @@ func handleStatusRequest(client *Client, _ *EmptyPacket) error {
 	response := StatusResponse{
 		Version: StatusVersion{
 			"GoProtocol",
-			client.ProtocolVersion,
+			int(client.ProtocolVersion),
 		},
 		Players:     StatusPlayers{Max: -1, Online: 6969},
-		Description: ChatComponent{Text: "§cCoucou §bles §anoobs"},
+		Description: types.ChatComponent{Text: "§cCoucou §bles §anoobs"},
 		Favicon:     favicon,
 	}
 	return client.SendPacket(0x00, StatusResponsePacket{response})

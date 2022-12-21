@@ -1,13 +1,14 @@
 package internal
 
 import (
+	"_tomcraft/go-mc-ping/internal/types"
 	"crypto/md5"
 	"fmt"
 	"log"
 )
 
 type DisconnectPacket struct {
-	Text ChatComponent `packet:"component"`
+	Text types.ChatComponent `packet:"component"`
 }
 
 type LoginStartPacket struct {
@@ -43,7 +44,10 @@ func createOfflineUuid(username string) string {
 func handleLoginStart(client *Client, packet *LoginStartPacket) error {
 	log.Println("Answering to login start")
 
-	client.Identity = &Identity{createOfflineUuid(packet.Username), packet.Username}
+	client.Identity = &types.Identity{
+		Uuid:     createOfflineUuid(packet.Username),
+		Username: packet.Username,
+	}
 	if err := client.SendPacket(0x02, LoginFinishPacket{client.Identity.Uuid, client.Identity.Username}); err != nil {
 		return err
 	}

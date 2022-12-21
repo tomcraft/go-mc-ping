@@ -1,12 +1,14 @@
 package internal
 
 import (
+	"_tomcraft/go-mc-ping/internal/codec"
+	"_tomcraft/go-mc-ping/internal/types"
 	"fmt"
 	"time"
 )
 
 type KeepAlivePacket struct {
-	RandomId int `packet:"varint"`
+	RandomId uint `packet:"uvarint"`
 }
 
 type JoinGamePacket struct {
@@ -30,8 +32,8 @@ type IncomingChatPacket struct {
 }
 
 type OutgoingChatPacket struct {
-	Text     ChatComponent `packet:"component"`
-	Position byte          `packet:"byte"`
+	Text     types.ChatComponent `packet:"component"`
+	Position byte                `packet:"byte"`
 }
 
 type CustomPayloadPacket struct {
@@ -43,7 +45,7 @@ func CreatePlayProtocol() ProtocolHandler {
 	handlers := make(map[byte]PacketHandler)
 	handlers[0x00] = AutoPacketHandler(handleKeepAlive)
 	handlers[0x01] = AutoPacketHandler(handleTextInput)
-	return MapProtocolHandlerWithDefault(handlers, func(client *Client, reader ByteArrayReader) error {
+	return MapProtocolHandlerWithDefault(handlers, func(client *Client, reader codec.ByteArrayReader) error {
 		return nil
 	})
 }
@@ -56,5 +58,5 @@ func handleKeepAlive(client *Client, packet *KeepAlivePacket) error {
 }
 
 func handleTextInput(client *Client, packet *IncomingChatPacket) error {
-	return client.SendMessage(ChatComponent{Text: fmt.Sprintf("<%s> %s", client.Identity.Username, packet.Text)}, 0)
+	return client.SendMessage(types.ChatComponent{Text: fmt.Sprintf("<%s> %s", client.Identity.Username, packet.Text)}, 0)
 }

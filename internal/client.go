@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"_tomcraft/go-mc-ping/internal/codec"
+	"_tomcraft/go-mc-ping/internal/types"
 	"bufio"
 	"bytes"
 	"errors"
@@ -18,19 +20,14 @@ type Client struct {
 	ReadBuffer                bytes.Buffer
 	SendBuffer                bytes.Buffer
 	SendLock                  sync.Mutex
-	ProtocolVersion           int
+	ProtocolVersion           uint
 	ProtocolState             int
 	ProtocolHandler           ProtocolHandler
 	VirtualHost               string
-	Identity                  *Identity
-	LastKeepAlive             int
+	Identity                  *types.Identity
+	LastKeepAlive             uint
 	LastSentKeepAliveTime     int64
 	LastReceivedKeepAliveTime int64
-}
-
-type Identity struct {
-	Uuid     string
-	Username string
 }
 
 func (client *Client) CloseConnection() error {
@@ -87,13 +84,13 @@ func (client *Client) SwitchProtocol(newProtocol int) error {
 		client.ProtocolState = newProtocol
 		client.ProtocolHandler = DefinedProtocols[newProtocol]
 	default:
-		return errors.New(fmt.Sprintf("invalid new protocol: %d", newProtocol))
+		return fmt.Errorf("invalid new protocol: %d", newProtocol)
 	}
 	return nil
 }
 
 func (client *Client) processPacket() error {
-	frameBytes, err := readByteArray(client.ConnectionReader)
+	frameBytes, err := codec.ReadByteArray(client.ConnectionReader)
 	if err != nil {
 		return err
 	}
@@ -104,7 +101,7 @@ func (client *Client) processPacket() error {
 		return err
 	}
 
-	packetId, err := readVarInt(&client.ReadBuffer)
+	packetId, err := codec.ReadUnsignedVarInt(&client.ReadBuffer)
 	if err != nil {
 		return err
 	}
@@ -112,7 +109,7 @@ func (client *Client) processPacket() error {
 	handler := client.ProtocolHandler(byte(packetId))
 
 	if handler == nil {
-		return client.Disconnect(ChatComponent{Text: fmt.Sprintf("Unknown packet id %d", byte(packetId))})
+		return client.Disconnect(types.ChatComponent{Text: fmt.Sprintf("Unknown packet id %d", byte(packetId))})
 	}
 
 	return handler(client, &client.ReadBuffer)
@@ -126,10 +123,10 @@ func (client *Client) tick() error {
 				return err
 			}
 		} else if now-client.LastReceivedKeepAliveTime >= 20000 {
-			return client.Disconnect(ChatComponent{Text: "Timed-out :("})
+			return client.Disconnect(types.ChatComponent{Text: "Timed-out :("})
 		}
 		if (now/1000)%2 == 0 {
-			if err := client.SendMessage(ChatComponent{"Coucou bb"}, 2); err != nil {
+			if err := client.SendMessage(types.ChatComponent{Text: "Coucou bb"}, 2); err != nil {
 				return err
 			}
 		}
@@ -138,15 +135,15 @@ func (client *Client) tick() error {
 }
 
 func (client *Client) SendPacket(id byte, packet any) error {
-	return client.SendRawPacket(id, func(writer ByteArrayWriter) error {
-		return SerializePacket(writer, packet)
+	return client.SendRawPacket(id, func(writer codec.ByteArrayWriter) error {
+		return codec.SerializePacket(writer, packet)
 	})
 }
 
-func (client *Client) SendRawPacket(id byte, handler func(writer ByteArrayWriter) error) error {
+func (client *Client) SendRawPacket(id byte, handler func(writer codec.ByteArrayWriter) error) error {
 	packetBuffer := bytes.Buffer{}
 
-	if err := writeVarInt(&packetBuffer, int(id)); err != nil {
+	if err := codec.WriteUnsignedVarInt(&packetBuffer, uint(id)); err != nil {
 		return err
 	}
 	if err := handler(&packetBuffer); err != nil {
@@ -156,7 +153,7 @@ func (client *Client) SendRawPacket(id byte, handler func(writer ByteArrayWriter
 	client.SendLock.Lock()
 	defer client.SendLock.Unlock()
 	client.SendBuffer.Reset()
-	if err := writeByteArray(&client.SendBuffer, packetBuffer.Bytes()); err != nil {
+	if err := codec.WriteByteArray(&client.SendBuffer, packetBuffer.Bytes()); err != nil {
 		return err
 	}
 	_, err := client.SendBuffer.WriteTo(client.Connection)
@@ -165,7 +162,7 @@ func (client *Client) SendRawPacket(id byte, handler func(writer ByteArrayWriter
 
 func (client *Client) KeepAlive() error {
 	client.LastSentKeepAliveTime = time.Now().UnixMilli()
-	client.LastKeepAlive = int(time.Now().Unix())
+	client.LastKeepAlive = uint(time.Now().Unix())
 	return client.SendPacket(0x00, KeepAlivePacket{client.LastKeepAlive})
 }
 
@@ -193,11 +190,11 @@ func (client *Client) Join() error {
 	return nil
 }
 
-func (client *Client) SendMessage(message ChatComponent, position byte) error {
+func (client *Client) SendMessage(message types.ChatComponent, position byte) error {
 	return client.SendPacket(0x02, OutgoingChatPacket{message, position})
 }
 
-func (client *Client) Disconnect(message ChatComponent) error {
+func (client *Client) Disconnect(message types.ChatComponent) error {
 	log.Println("disconnecting client for reason: " + message.Text)
 	if client.ProtocolState == 0 || client.ProtocolState == 1 {
 		return client.CloseConnection()

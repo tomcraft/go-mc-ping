@@ -7,10 +7,10 @@ import (
 )
 
 type HandshakePacket struct {
-	ProtocolVersion int    `packet:"varint"`
+	ProtocolVersion uint   `packet:"uvarint"`
 	ServerAddress   string `packet:"string"`
 	ServerPort      int    `packet:"int16"`
-	RequestedState  int    `packet:"varint"`
+	RequestedState  uint   `packet:"uvarint"`
 }
 
 func CreateHandshakeProtocol() ProtocolHandler {
@@ -29,5 +29,5 @@ func handleHandshake(client *Client, packet *HandshakePacket) error {
 
 	client.ProtocolVersion = packet.ProtocolVersion
 	client.VirtualHost = fmt.Sprintf("%s:%d", packet.ServerAddress, packet.ServerPort)
-	return client.SwitchProtocol(packet.RequestedState)
+	return client.SwitchProtocol(int(packet.RequestedState))
 }

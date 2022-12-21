@@ -1,6 +1,7 @@
-package internal
+package codec
 
 import (
+	"_tomcraft/go-mc-ping/internal/types"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -65,7 +66,7 @@ func GetOrRegisterPacketCodec(packetType reflect.Type) (*PacketCodec, error) {
 	return codec, nil
 }
 
-func readInt8(reader ByteArrayReader) (int8, error) {
+func ReadInt8(reader ByteArrayReader) (int8, error) {
 	b, err := reader.ReadByte()
 	if err != nil {
 		return 0, err
@@ -73,117 +74,160 @@ func readInt8(reader ByteArrayReader) (int8, error) {
 	return int8(b), nil
 }
 
-func writeInt8(writer ByteArrayWriter, value int8) error {
+func WriteInt8(writer ByteArrayWriter, value int8) error {
 	return writer.WriteByte(byte(value))
 }
 
-func readByte(reader ByteArrayReader) (byte, error) {
+func ReadByte(reader ByteArrayReader) (byte, error) {
 	return reader.ReadByte()
 }
 
-func writeByte(writer ByteArrayWriter, value byte) error {
+func WriteByte(writer ByteArrayWriter, value byte) error {
 	return writer.WriteByte(value)
 }
 
-func readVarInt(reader ByteArrayReader) (int, error) {
-	value, err := binary.ReadUvarint(reader)
+func ReadVarInt(reader ByteArrayReader) (int, error) {
+	value, err := binary.ReadVarint(reader)
 	return int(value), err
 }
 
-func writeVarInt(writer ByteArrayWriter, value int) error {
-	for value >= 0x80 {
-		if err := writer.WriteByte(byte(value) | 0x80); err != nil {
-			return err
-		}
-		value >>= 7
-	}
-	return writer.WriteByte(byte(value))
+func ReadUnsignedVarInt(reader ByteArrayReader) (uint, error) {
+	value, err := binary.ReadUvarint(reader)
+	return uint(value), err
 }
 
-func readAnyInt[T constraints.Integer](reader ByteArrayReader, size int) (T, error) {
+func _writeVarInt(writer ByteArrayWriter, x int64) error {
+	ux := uint64(x) << 1
+	if x < 0 {
+		ux = ^ux
+	}
+	return _writeUnsignedVarInt(writer, ux)
+}
+
+func _writeUnsignedVarInt(writer ByteArrayWriter, x uint64) error {
+	for x >= 0x80 {
+		if err := writer.WriteByte(byte(x) | 0x80); err != nil {
+			return err
+		}
+		x >>= 7
+	}
+	return writer.WriteByte(byte(x))
+}
+
+func WriteUnsignedVarInt(writer ByteArrayWriter, value uint) error {
+	return _writeUnsignedVarInt(writer, uint64(value))
+}
+
+func WriteVarInt(writer ByteArrayWriter, value int) error {
+	return _writeVarInt(writer, int64(value))
+}
+
+func readAnyInt[T constraints.Signed](reader ByteArrayReader, size int) (T, error) {
+	ux, err := readAnyUnsignedInt[uint64](reader, size)
+	if err != nil {
+		return 0, err
+	}
+	x := int64(ux >> 1)
+	if ux&1 != 0 {
+		x = ^x
+	}
+	return T(x), err
+}
+
+func readAnyUnsignedInt[T constraints.Unsigned](reader ByteArrayReader, size int) (T, error) {
 	var val uint64
 	for i := 0; i < size; i++ {
 		b, err := reader.ReadByte()
 		if err != nil {
 			return 0, nil
 		}
-		val |= uint64(b&0xFF) << i * 8
+		if i != 0 {
+			val <<= 8
+		}
+		val |= uint64(b)
 	}
 	return T(val), nil
 }
 
-func writeAnyInt[T constraints.Integer](writer ByteArrayWriter, value T, size int) error {
-	for i := 0; i < size; i++ {
-		if err := writer.WriteByte(byte(value)); err != nil {
+func writeAnyInt[T constraints.Signed](writer ByteArrayWriter, value T, size int) error {
+	ux := uint64(value) << 1
+	if value < 0 {
+		ux = ^ux
+	}
+	return writeAnyUnsignedInt(writer, ux, size)
+}
+
+func writeAnyUnsignedInt[T constraints.Unsigned](writer ByteArrayWriter, value T, size int) error {
+	for i := size - 1; i >= 0; i-- {
+		if err := writer.WriteByte(byte(value >> (i * 8))); err != nil {
 			return err
 		}
-		value >>= 8
 	}
 	return nil
 }
 
-func readInt(reader ByteArrayReader) (int, error) {
+func ReadInt(reader ByteArrayReader) (int, error) {
 	return readAnyInt[int](reader, 4)
 }
 
-func writeInt(writer ByteArrayWriter, value int) error {
+func WriteInt(writer ByteArrayWriter, value int) error {
 	return writeAnyInt[int](writer, value, 4)
 }
 
-func readInt16(reader ByteArrayReader) (int16, error) {
+func ReadInt16(reader ByteArrayReader) (int16, error) {
 	return readAnyInt[int16](reader, 2)
 }
 
-func writeInt16(writer ByteArrayWriter, value int16) error {
+func WriteInt16(writer ByteArrayWriter, value int16) error {
 	return writeAnyInt[int16](writer, value, 2)
 }
 
-func readInt64(reader ByteArrayReader) (int64, error) {
+func ReadInt64(reader ByteArrayReader) (int64, error) {
 	return readAnyInt[int64](reader, 8)
 }
 
-func writeInt64(writer ByteArrayWriter, value int64) error {
+func WriteInt64(writer ByteArrayWriter, value int64) error {
 	return writeAnyInt[int64](writer, value, 8)
 }
 
-func readFloat(reader ByteArrayReader) (float32, error) {
-	val, err := readAnyInt[uint32](reader, 4)
+func ReadFloat(reader ByteArrayReader) (float32, error) {
+	val, err := readAnyUnsignedInt[uint32](reader, 4)
 	if err != nil {
 		return 0, err
 	}
 	return math.Float32frombits(val), nil
 }
 
-func writeFloat(writer ByteArrayWriter, value float32) error {
-	return writeAnyInt[uint32](writer, math.Float32bits(value), 4)
+func WriteFloat(writer ByteArrayWriter, value float32) error {
+	return writeAnyUnsignedInt[uint32](writer, math.Float32bits(value), 4)
 }
 
-func readFloat64(reader ByteArrayReader) (float64, error) {
-	val, err := readAnyInt[uint64](reader, 8)
+func ReadFloat64(reader ByteArrayReader) (float64, error) {
+	val, err := readAnyUnsignedInt[uint64](reader, 8)
 	if err != nil {
 		return 0, err
 	}
 	return math.Float64frombits(val), nil
 }
 
-func writeFloat64(writer ByteArrayWriter, value float64) error {
-	return writeAnyInt[uint64](writer, math.Float64bits(value), 8)
+func WriteFloat64(writer ByteArrayWriter, value float64) error {
+	return writeAnyUnsignedInt[uint64](writer, math.Float64bits(value), 8)
 }
 
-func readString(reader ByteArrayReader) (string, error) {
-	if val, err := readByteArray(reader); err != nil {
+func ReadString(reader ByteArrayReader) (string, error) {
+	if val, err := ReadByteArray(reader); err != nil {
 		return "", err
 	} else {
 		return string(val), nil
 	}
 }
 
-func writeString(writer ByteArrayWriter, value string) error {
-	return writeByteArray(writer, []byte(value))
+func WriteString(writer ByteArrayWriter, value string) error {
+	return WriteByteArray(writer, []byte(value))
 }
 
-func readByteArray(reader ByteArrayReader) ([]byte, error) {
-	length, err := readVarInt(reader)
+func ReadByteArray(reader ByteArrayReader) ([]byte, error) {
+	length, err := ReadUnsignedVarInt(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -192,15 +236,15 @@ func readByteArray(reader ByteArrayReader) ([]byte, error) {
 	return byteArray, err
 }
 
-func writeByteArray(writer ByteArrayWriter, value []byte) error {
-	if err := writeVarInt(writer, len(value)); err != nil {
+func WriteByteArray(writer ByteArrayWriter, value []byte) error {
+	if err := WriteUnsignedVarInt(writer, uint(len(value))); err != nil {
 		return err
 	}
 	_, err := writer.Write(value)
 	return err
 }
 
-func readBool(reader ByteArrayReader) (bool, error) {
+func ReadBool(reader ByteArrayReader) (bool, error) {
 	val, err := reader.ReadByte()
 	if err != nil {
 		return false, err
@@ -212,7 +256,7 @@ func readBool(reader ByteArrayReader) (bool, error) {
 	}
 }
 
-func writeBool(writer ByteArrayWriter, value bool) error {
+func WriteBool(writer ByteArrayWriter, value bool) error {
 	if value {
 		return writer.WriteByte(1)
 	} else {
@@ -220,31 +264,35 @@ func writeBool(writer ByteArrayWriter, value bool) error {
 	}
 }
 
-func readChatComponent(reader ByteArrayReader) (ChatComponent, error) {
-	return readJson(reader, ChatComponent{})
+func ReadChatComponent(reader ByteArrayReader) (*types.ChatComponent, error) {
+	return ReadChatComponentTo(reader, new(types.ChatComponent))
 }
 
-func writeChatComponent(writer ByteArrayWriter, value ChatComponent) error {
-	return writeJson(writer, value)
+func ReadChatComponentTo(reader ByteArrayReader, componentPtr *types.ChatComponent) (*types.ChatComponent, error) {
+	return ReadJson[types.ChatComponent](reader, componentPtr)
 }
 
-func readJson[T any](reader ByteArrayReader, value T) (T, error) {
-	array, err := readByteArray(reader)
+func WriteChatComponent(writer ByteArrayWriter, value types.ChatComponent) error {
+	return WriteJson(writer, value)
+}
+
+func ReadJson[T any](reader ByteArrayReader, value *T) (*T, error) {
+	array, err := ReadByteArray(reader)
 	if err != nil {
-		return value, err
+		return nil, err
 	}
 	if err := json.Unmarshal(array, value); err != nil {
-		return value, err
+		return nil, err
 	}
 	return value, nil
 }
 
-func writeJson(writer ByteArrayWriter, value any) error {
+func WriteJson(writer ByteArrayWriter, value any) error {
 	jsonBytes, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	return writeByteArray(writer, jsonBytes)
+	return WriteByteArray(writer, jsonBytes)
 }
 
 func SerializePacket(writer ByteArrayWriter, packet any) error {
@@ -269,20 +317,20 @@ func SerializePacket(writer ByteArrayWriter, packet any) error {
 	return nil
 }
 
-func DeserializePacket(reader ByteArrayReader, packetType reflect.Type) (reflect.Value, error) {
-	packetPtr := reflect.New(packetType)
+func DeserializePacket[T any](reader ByteArrayReader, packetType reflect.Type) (*T, error) {
+	packetPtr := new(T)
 	packetCodec, err := GetOrRegisterPacketCodec(packetType)
 	if err != nil {
-		return packetPtr, err
+		return nil, err
 	}
-	packetValue := packetPtr.Elem()
+	packetValue := reflect.ValueOf(packetPtr).Elem()
 	for i, codec := range *packetCodec {
 		if codec == nil {
 			continue
 		}
 		fieldValue := packetValue.Field(i)
 		if err := codec.Reader(reader, fieldValue); err != nil {
-			return packetPtr, err
+			return nil, err
 		}
 	}
 	return packetPtr, nil
@@ -346,37 +394,37 @@ func createFloatCodec[T constraints.Float](writeFn func(ByteArrayWriter, T) erro
 }
 
 func init() {
-	RegisterCodec("byte", createUnsignedIntCodec[byte](writeByte, readByte))
-	RegisterCodec("int8", createIntCodec[int8](writeInt8, readInt8))
-	RegisterCodec("int16", createIntCodec[int16](writeInt16, readInt16))
-	RegisterCodec("int", createIntCodec[int](writeInt, readInt))
-	RegisterCodec("int64", createCodec[int64](writeInt64, readInt64, reflect.Value.Int, reflect.Value.SetInt))
-	RegisterCodec("varint", createIntCodec[int](writeVarInt, readVarInt))
+	RegisterCodec("byte", createUnsignedIntCodec[byte](WriteByte, ReadByte))
+	RegisterCodec("int8", createIntCodec[int8](WriteInt8, ReadInt8))
+	RegisterCodec("int16", createIntCodec[int16](WriteInt16, ReadInt16))
+	RegisterCodec("int", createIntCodec[int](WriteInt, ReadInt))
+	RegisterCodec("int64", createCodec[int64](WriteInt64, ReadInt64, reflect.Value.Int, reflect.Value.SetInt))
+	RegisterCodec("varint", createIntCodec[int](WriteVarInt, ReadVarInt))
+	RegisterCodec("uvarint", createUnsignedIntCodec[uint](WriteUnsignedVarInt, ReadUnsignedVarInt))
 
-	RegisterCodec("float", createFloatCodec[float32](writeFloat, readFloat))
-	RegisterCodec("float64", createCodec[float64](writeFloat64, readFloat64, reflect.Value.Float, reflect.Value.SetFloat))
+	RegisterCodec("float", createFloatCodec[float32](WriteFloat, ReadFloat))
+	RegisterCodec("float64", createCodec[float64](WriteFloat64, ReadFloat64, reflect.Value.Float, reflect.Value.SetFloat))
 
-	RegisterCodec("bool", createCodec[bool](writeBool, readBool, reflect.Value.Bool, reflect.Value.SetBool))
-	RegisterCodec("string", createCodec[string](writeString, readString, reflect.Value.String, reflect.Value.SetString))
-	RegisterCodec("byte_array", createCodec[[]byte](writeByteArray, readByteArray, reflect.Value.Bytes, reflect.Value.SetBytes))
+	RegisterCodec("bool", createCodec[bool](WriteBool, ReadBool, reflect.Value.Bool, reflect.Value.SetBool))
+	RegisterCodec("string", createCodec[string](WriteString, ReadString, reflect.Value.String, reflect.Value.SetString))
+	RegisterCodec("byte_array", createCodec[[]byte](WriteByteArray, ReadByteArray, reflect.Value.Bytes, reflect.Value.SetBytes))
 
 	RegisterCodec("component", TypeCodec{
-		Writer: createWriter(writeChatComponent, func(value reflect.Value) ChatComponent {
-			return value.Interface().(ChatComponent)
+		Writer: createWriter(WriteChatComponent, func(value reflect.Value) types.ChatComponent {
+			return value.Interface().(types.ChatComponent)
 		}),
-		Reader: createReader(readChatComponent, func(value reflect.Value, val ChatComponent) {
-			value.Set(reflect.ValueOf(val))
-		}),
+		Reader: func(reader ByteArrayReader, value reflect.Value) error {
+			val := value.Addr().Interface().(*types.ChatComponent)
+			_, err := ReadChatComponentTo(reader, val)
+			return err
+		},
 	})
 	RegisterCodec("json", TypeCodec{
-		Writer: createWriter(writeJson, reflect.Value.Interface),
+		Writer: createWriter(WriteJson, reflect.Value.Interface),
 		Reader: func(reader ByteArrayReader, value reflect.Value) error {
-			val, err := readJson(reader, value)
-			if err != nil {
-				return err
-			}
-			value.Set(val)
-			return nil
+			val := value.Addr().Interface()
+			_, err := ReadJson(reader, &val)
+			return err
 		},
 	})
 }
